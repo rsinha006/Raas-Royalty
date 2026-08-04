@@ -1,0 +1,11 @@
+node_modules/
+data/
+client/dist/
+.env
+.DS_Store
+*.log
+
+# Real rosters and past master schedules — these carry participant names and
+# contact details and must never reach this repo, which is public.
+# Anonymized fixtures derived from them live in fixtures/ and ARE committed.
+samples/

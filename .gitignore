@@ -5,6 +5,9 @@ client/dist/
 .DS_Store
 *.log
 
+# Excel lock files, created whenever someone has a workbook open.
+~$*
+
 # Real rosters and past master schedules — these carry participant names and
 # contact details and must never reach this repo, which is public.
 # Anonymized fixtures derived from them live in fixtures/ and ARE committed.

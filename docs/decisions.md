@@ -223,12 +223,19 @@ and the failure is silent — a shifted schedule looks exactly like a correct on
 Making it a single server-side value also means a venue change is a config edit,
 not a hunt through date handling.
 
-**Pending, not blocking:** the actual values. Dates are not locked as of
-2026-08-05. The timezone default is `America/Indiana/Indianapolis` on the
-evidence that this is an IU-run event in Bloomington; **confirm this against the
-venue before item 24** — Indiana has two zones and the Bloomington/Evansville
-split is a real trap. The seeded 2026-08-07 in `data/` and in the template's
-event-date cell are placeholders and should be treated as such.
+**Timezone confirmed 2026-08-05:** the venue is Bloomington, Indiana (Monroe
+County), so `EVENT_TIMEZONE=America/Indiana/Indianapolis`.
+
+Store the **IANA zone name, never a fixed offset.** Monroe County observes
+daylight saving — it is EST (UTC−5) in winter and EDT (UTC−4) from March to
+November. A config value of `EST` or `-05:00` would render every block an hour
+early for any event held between spring and autumn, which is the silent
+whole-schedule failure this decision exists to prevent. Indiana is also split
+across two zones (the Gary and Evansville corners are Central), so a future venue
+change must re-derive the zone rather than assume Indiana means one thing.
+
+**Still pending:** the dates. Not locked as of 2026-08-05. The 2026-08-07 in
+`data/` and in the template's event-date cell are placeholders.
 
 ---
 

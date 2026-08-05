@@ -51,13 +51,12 @@ Summary, with the item each one now constrains:
 | Data model | Model fits, except: `person_roles` join table, `teams.show_order`, `people.is_captain`. | 13 |
 | Judges | Running order + a few role-targeted blocks. No authored per-judge schedule. | 13, 24 |
 | Schedule source of truth | Logistics fills `templates/royalty-schedule-template.xlsx`; the app imports it. Admin panel is source of truth for live changes only. | 12, 24 |
-| Event timezone | Server-authoritative, one IANA zone from config. Default `America/Indiana/Indianapolis`, **unconfirmed**. | 9, 24 |
+| Event timezone | Server-authoritative. `America/Indiana/Indianapolis` (Bloomington, IN) — IANA name, never a fixed offset. | 9, 24 |
 | Headcount | Size for 280, load test at 600. | 20, 25 |
 
-Two values are pending but not blocking, because they are data rather than
-design: the real **event dates** (not locked as of 2026-08-05 — the 2026-08-07 in
-the seed and in the template is a placeholder) and **venue confirmation** for the
-timezone. Both must be settled before item 24.
+One value is still pending but not blocking, because it is data rather than
+design: the real **event dates**. Not locked as of 2026-08-05 — the 2026-08-07 in
+the seed and in the template is a placeholder. Settle before item 24.
 
 Three questions remain open for the event director. None block engineering:
 

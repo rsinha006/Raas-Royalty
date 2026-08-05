@@ -90,7 +90,7 @@ item 27 unenforceable.
   commit." Then commit after every numbered item.
 - **Done when:** `git log` shows an initial commit and `data/` is ignored.
 
-### 2. `[ ]` Analyze the sample rosters and past master schedules
+### 2. `[x]` Analyze the sample rosters and past master schedules
 
 Raw and unedited — the mess is the signal. Include before/after versions of a
 past weekend if they survived; the diff shows what actually changes live.
@@ -100,6 +100,24 @@ past weekend if they survived; the diff shows what actually changes live.
   the data implies about the model."*
 - **Done when:** a written analysis exists and the item 2 questions above are
   answered or narrowed.
+
+**Done 2026-08-05** — [docs/sample-data-analysis.md](docs/sample-data-analysis.md).
+Only one year was supplied (RRXVI 24–25), no before/after pair, so year-over-year
+drift is inferred from drift between the four day sheets. Headlines:
+
+- **The master schedule contains no dancers.** All ~60 rows are exec board and
+  liaisons. Dancer schedules exist only scattered across six logistics tabs —
+  assembling them is content work nothing in this plan currently budgets for.
+- **It is a merged Gantt wall chart, not a table** (651–751 merged ranges per
+  day). Item 12's "column mapping" is the wrong shape; it needs a grid decoder.
+- **Meridiem is written on the end time only** in 143 cells, absent in 49 —
+  a naive parser produces a silent 12-hour error. Text and grid disagree in 8.6%
+  of cells even parsed correctly.
+- Past-midnight blocks are routine; Saturday's call time is 03:45.
+- ~260 participants last year, against the ~170 assumed in CLAUDE.md.
+
+Five of the six item-2 model questions are answered (see the analysis); the sixth
+— judges — is narrowed. Five questions now need the event director, not the data.
 
 ### 3. `[ ]` Resolve the open decisions
 

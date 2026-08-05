@@ -22,8 +22,11 @@ offline fallback and auto-recovery, CSV import with preview/commit, force
 re-sync, all three targeting modes (team / person / role), and graceful
 recovery from a stale saved session.
 
-**Not yet true of this project:** no version control, no tests, no deployment,
-no real data, no access control on the viewer.
+**Not yet true of this project:** no tests, no deployment, no real data, no
+access control on the viewer.
+
+Phase A items 1–3 are done. The open decisions are resolved (see below); items 12
+and 13 were reshaped by them. Next up is item 4, then Phase B.
 
 ### Architecture in one paragraph
 
@@ -39,20 +42,31 @@ env-var change. See [README.md](README.md) for setup and the data model.
 
 ## Open decisions
 
-Blocking. Resolve in Phase A, record in `docs/decisions.md`.
+**All resolved 2026-08-05** — reasoning in [docs/decisions.md](docs/decisions.md).
+Summary, with the item each one now constrains:
 
-1. **Role-level access codes.** "Every team, role, user gets a password" — teams
-   and users map cleanly onto a schedule; roles don't. A single shared "Judge"
-   code lets any judge read any other judge's schedule. Recommendation:
-   per-person codes for staff, per-team codes for dancers, role-level codes only
-   where you'd rather hand six sponsors one code than manage six.
-2. **Data model questions** (answerable from past-year data plus a short call
-   with the event director): Can a dancer compete with two teams? Does anyone
-   hold two roles? Is there a level above teams — divisions, brackets? Does a
-   team perform more than once? Do judges need the running order rather than one
-   long scoring block? Is anything scheduled per-person *within* a team?
-3. **Event timezone and dates.** Currently seeded as Aug 7–8 2026, rendered
-   against the phone's local clock.
+| Decision | Resolution | Constrains |
+| --- | --- | --- |
+| Access-code granularity | Per-team for dancers, per-person for staff. Role codes are a deliberate exception, not a default. | 5, 6, 8, 25 |
+| Data model | Model fits, except: `person_roles` join table, `teams.show_order`, `people.is_captain`. | 13 |
+| Judges | Running order + a few role-targeted blocks. No authored per-judge schedule. | 13, 24 |
+| Schedule source of truth | Logistics fills `templates/royalty-schedule-template.xlsx`; the app imports it. Admin panel is source of truth for live changes only. | 12, 24 |
+| Event timezone | Server-authoritative, one IANA zone from config. Default `America/Indiana/Indianapolis`, **unconfirmed**. | 9, 24 |
+| Headcount | Size for 280, load test at 600. | 20, 25 |
+
+Two values are pending but not blocking, because they are data rather than
+design: the real **event dates** (not locked as of 2026-08-05 — the 2026-08-07 in
+the seed and in the template is a placeholder) and **venue confirmation** for the
+timezone. Both must be settled before item 24.
+
+Three questions remain open for the event director. None block engineering:
+
+1. Does `*` / `**` on the roster mean captain? (We import it as one, flagged for
+   review — `people.is_captain` exists either way.)
+2. Is `Ashka Patel` one person in two roles, or two people who share a name?
+   (We support two roles regardless.)
+3. Will logistics accept the template, or push back on it? (Worth confirming
+   early — it is the load-bearing assumption behind item 12.)
 
 ---
 
@@ -81,7 +95,7 @@ costs lost-code support at check-in.
 
 Blocks everything else. Do these first.
 
-### 1. `[ ]` Put the project under version control
+### 1. `[x]` Put the project under version control
 
 Not a git repo yet, which makes every step below riskier and the code freeze in
 item 27 unenforceable.
@@ -119,7 +133,7 @@ drift is inferred from drift between the four day sheets. Headlines:
 Five of the six item-2 model questions are answered (see the analysis); the sixth
 — judges — is narrowed. Five questions now need the event director, not the data.
 
-### 3. `[ ]` Resolve the open decisions
+### 3. `[x]` Resolve the open decisions
 
 Data model from the analysis plus a short call with the event director; the
 role-code question from the access-code design.
@@ -127,6 +141,21 @@ role-code question from the access-code design.
 - **Claude Code:** Use plan mode. Finish with *"write these decisions to
   docs/decisions.md."*
 - **Done when:** every open decision above has a recorded answer.
+
+**Done 2026-08-05** — six entries in [docs/decisions.md](docs/decisions.md),
+summarized in the table above. What changed downstream:
+
+- **Item 12 shrank.** It is a template importer against a workbook we control,
+  not a decoder for their wall chart. The messy-input lessons still apply to the
+  Roster and People tabs, which are still pasted in from the same sources.
+- **Item 13 is bounded** to one join table (`person_roles`) and two columns
+  (`teams.show_order`, `people.is_captain`). The late-schema-change risk is
+  effectively closed.
+- **Items 8 and 28 became non-optional.** Per-person staff codes means ~80 codes
+  to distribute and a real lost-link path at check-in.
+- **Item 20's target moved** from 400 connections to 600.
+- **Item 24 gained content work** — the dancer schedules that don't exist as data
+  anywhere have to be authored into the template.
 
 ### 4. `[ ]` Anonymize the samples into committed fixtures
 
@@ -201,16 +230,26 @@ Every change currently makes all ~170 clients refetch. The audience
 (`personIds` / `teamIds`) is already computed for the edit log — put it in the
 broadcast and let clients ignore changes that don't affect them.
 
-### 12. `[ ]` Rebuild the importer against the real format, add column mapping
+### 12. `[ ]` Build the template importer
 
-Map their columns onto your fields at upload time and remember the mapping.
-Turns "their sheet must match our template" into "our importer adapts."
+Read the known tabs of `templates/royalty-schedule-template.xlsx` — People,
+Teams, Roster, the four day grids, Team Blocks, Airport — validate against the
+checks the workbook already computes, and reject with row-level errors rather
+than partial imports.
+
+Not a column-mapping UI and not a general grid decoder; see the source-of-truth
+decision. But the messy-input handling from the analysis still applies, because
+Roster and People are pasted in from the same sources as last year: normalize
+phone numbers to digits (four formats, including invisible Unicode direction
+marks), trim trailing spaces on names, inherit meridiem from end time to start,
+and tiebreak within-team name collisions.
 
 ### 13. `[ ]` Apply model changes from item 3
 
-Two roles per person, divisions, teams performing twice — whatever the data said.
-Late schema changes are the most expensive thing on this list; this is why
-Phase A comes first.
+Bounded, per the data-model decision: a `person_roles` join table replacing
+single `people.role_id` (personalization matches `role_id IN (…)`),
+`teams.show_order`, and `people.is_captain`. No divisions, no multi-team dancers,
+no second performance.
 
 ### 14. `[ ]` Fix the known correctness gaps
 
@@ -270,7 +309,8 @@ authorization, negative cases explicit.
 
 ### 20. `[ ]` Load test at 2–3× real scale
 
-400 connections, a burst of admin edits, a mass reconnect.
+600 connections, a burst of admin edits, a mass reconnect. (Raised from 400:
+last year was ~260 people, not the ~170 originally assumed.)
 
 - **Claude Code:** *"Write a load-test script and report the numbers."* Numbers,
   not reassurance.
@@ -308,7 +348,11 @@ will not be reading server logs during a competition.
 
 ### 24. `[ ]` Load the real roster and schedule
 
-By now this should be a data task, not an engineering one.
+By now this should be a data task, not an engineering one — but a bigger one
+than that sounds. Pin the real dates and confirm the venue timezone here. And
+note the analysis finding: **dancer schedules do not exist as data anywhere**.
+They were scattered across six logistics tabs last year and have to be authored
+into the template. Budget that as content work, with a named owner.
 
 ### 25. `[ ]` Generate and distribute access links
 
@@ -342,8 +386,10 @@ for "I lost my link" at the check-in desk.
 | Access codes look enforced but aren't | Server-side session check + security review + tests | 6 |
 | Reload while offline shows a browser error | Service worker | 10 |
 | Timezone silently shifts every time shown | Server-authoritative timezone | 9 |
-| Real spreadsheet doesn't match the template | Analyze past years, add column mapping | 2, 12 |
-| Late schema change forces rework | Answer model questions before building | 2, 3 |
+| Real spreadsheet doesn't match the template | Logistics authors in our template; importer validates and rejects loudly | 12 |
+| Logistics rejects the template and sends a wall chart | Confirm with the director early; the fallback is expensive | 3, 12 |
+| Dancer schedules have no source and never get authored | Named owner for the content work at item 24 | 24 |
+| ~~Late schema change forces rework~~ | Closed — model confirmed against past-year data | 2, 3 |
 | Thundering herd on every change | Audience-scoped broadcasts + load test | 11, 20 |
 | Total app failure during the event | Backups, monitoring, printed fallback | 23, 28 |
 

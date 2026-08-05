@@ -1,7 +1,8 @@
 # Royalty
 
-Live personalized event schedules for a dance competition (~170 participants
-across dancers, exec board, judges, videographers, sponsors, and logistics).
+Live personalized event schedules for a dance competition (~280 participants
+across dancers, exec board, judges, videographers, sponsors, and logistics —
+last year was ~260; the ~170 previously recorded here was an underestimate).
 Everyone opens the app, identifies themselves, and sees only their own schedule,
 updating live as logistics changes things.
 
@@ -52,7 +53,10 @@ Data model and spreadsheet templates are documented in [README.md](README.md).
 
 ## Current state
 
-Draft is complete and manually verified. No version control, no tests, no
-deployment, no real data, and **no access control on the viewer** — anyone with
-the link can read any participant's schedule and contact details. Fixing that is
-Phase B of the plan.
+Draft is complete and manually verified. No tests, no deployment, no real data,
+and **no access control on the viewer** — anyone with the link can read any
+participant's schedule and contact details. Fixing that is Phase B of the plan.
+
+Phase A items 1–3 are done. The design decisions that were blocking are settled
+in [docs/decisions.md](docs/decisions.md) — read it before changing the data
+model, the importer, or anything about access codes.

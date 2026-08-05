@@ -349,6 +349,103 @@ describe('a team code is scoped to its own team', () => {
   });
 });
 
+describe('magic links', () => {
+  test('/s/:code signs in and redirects, leaving the code out of the landing URL', async () => {
+    resetRateLimiter();
+    const c = jar();
+    const res = await call('GET', `/s/${ids.judge}`, { cookies: c });
+    assert.equal(res.status, 302);
+    assert.equal(res.body, null);
+
+    const sched = await call('GET', '/api/schedule', { cookies: c });
+    assert.equal(sched.status, 200, 'the redirect should have established a session');
+    assert.deepEqual(labels(sched.body), ['Judging panel']);
+  });
+
+  test('a bad code redirects to the code screen with a reason, and grants nothing', async () => {
+    resetRateLimiter();
+    const cases = { ZZZZZZZZ: 'invalid', 'not-a-code': 'invalid' };
+    for (const [code, reason] of Object.entries(cases)) {
+      const c = jar();
+      const res = await call('GET', `/s/${code}`, { cookies: c });
+      assert.equal(res.status, 302);
+      assert.match(res.text, new RegExp(`signin=${reason}`), `${code} -> ${reason}`);
+      assert.equal((await call('GET', '/api/schedule', { cookies: c })).status, 401);
+    }
+  });
+
+  test('a revoked code redirects with its own distinct reason', async () => {
+    resetRateLimiter();
+    const code = issueCode({ subjectType: 'person', subjectId: 'p_amir' }).code;
+    revokeCode(code);
+    const res = await call('GET', `/s/${code}`);
+    assert.equal(res.status, 302);
+    assert.match(res.text, /signin=revoked/);
+  });
+
+  test('magic links share the manual box rate limiter', async () => {
+    resetRateLimiter();
+    let limited = false;
+    for (let i = 0; i < 15; i++) {
+      const res = await call('GET', '/s/ZZZZZZZZ');
+      if (/signin=rate/.test(res.text)) {
+        limited = true;
+        break;
+      }
+    }
+    assert.ok(limited, 'expected the magic link to hit the same limiter');
+    // And the manual box is limited too — one budget, not two.
+    assert.equal((await call('POST', '/api/session', { body: { code: ids.judge } })).status, 429);
+    resetRateLimiter();
+  });
+
+  test('a team magic link lands on the identity step, not a schedule', async () => {
+    resetRateLimiter();
+    const c = jar();
+    await call('GET', `/s/${ids.teamA}`, { cookies: c });
+    const session = await call('GET', '/api/session', { cookies: c });
+    assert.equal(session.status, 200);
+    assert.equal(session.body.needsIdentity, true);
+    assert.equal(session.body.identified, false);
+  });
+});
+
+describe('returning and leaving', () => {
+  test('a returning visit needs no code', async () => {
+    resetRateLimiter();
+    const c = await signIn(ids.judge);
+    // Same cookie, fresh page load.
+    const again = await call('GET', '/api/session', { cookies: c });
+    assert.equal(again.status, 200);
+    assert.equal(again.body.needsIdentity, false);
+    assert.equal(again.body.subject.name, 'Jordan Judge');
+  });
+
+  test('signing out ends the session', async () => {
+    resetRateLimiter();
+    const c = await signIn(ids.judge);
+    assert.equal((await call('DELETE', '/api/session', { cookies: c })).status, 200);
+    assert.equal((await call('GET', '/api/schedule', { cookies: c })).status, 401);
+  });
+
+  test('stepping back to the team list keeps the session but drops the person', async () => {
+    resetRateLimiter();
+    const c = await signIn(ids.teamA);
+    await call('POST', '/api/session/identify', { body: { personId: 'p_alice' }, cookies: c });
+    assert.deepEqual(labels((await call('GET', '/api/schedule', { cookies: c })).body), [
+      'Alice airport pickup',
+      'Alpha warm-up',
+    ]);
+
+    const back = await call('DELETE', '/api/session/identify', { cookies: c });
+    assert.equal(back.status, 200);
+    assert.equal(back.body.needsIdentity, true);
+    assert.deepEqual(labels((await call('GET', '/api/schedule', { cookies: c })).body), [
+      'Alpha warm-up',
+    ]);
+  });
+});
+
 describe('cookie tampering', () => {
   test('a forged or edited session cookie is rejected', async () => {
     resetRateLimiter();

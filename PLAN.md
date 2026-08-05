@@ -302,7 +302,7 @@ are private and to open your link; there is no way to sign in from it yet. The
 old role picker is gone (`Landing.tsx` deleted) because it depended on the
 roster dump. Admin panel is unaffected.
 
-### 7. `[ ]` Rebuild the landing flow as code entry + magic links
+### 7. `[x]` Rebuild the landing flow as code entry + magic links
 
 `/s/:code` auto-signs-in. Manual entry box as fallback. Distinct states for
 invalid, revoked, and expired codes.
@@ -317,6 +317,27 @@ dancer at all; see the captains decision.
   valid code, bad code, revoked code, a returning visit with no typing, and a
   team code resolving to one dancer's own schedule.
 - **Done when:** all five paths are demonstrated working, not just implemented.
+
+**Done 2026-08-05** — all six paths demonstrated at 375×812, plus 8 new tests
+(29 total). `CodeEntry.tsx`, `IdentityPicker.tsx`, rewritten `Viewer.tsx`,
+`server/routes/magic-link.js`.
+
+**`/s/:code` is handled server-side**, not in React: it redeems, sets the
+cookie, and 302s to `/`. That means a magic link works before the bundle has
+downloaded, and the code does not linger in the address bar or in browser
+history where it would ride into screenshots. Both entry paths share one
+`redeemCode()` and therefore one rate-limit budget — the magic link is the path
+almost everyone uses, so it must not be the untested one.
+
+Five distinct failure states, each with its own copy: `invalid`, `revoked`,
+`orphaned`, `rate`, and `expired`. Note that **codes never expire** — "expired"
+is a *session* running out, distinguished from a first visit by a localStorage
+marker. A genuine code expiry is still unbuilt (see item 6's residual list).
+
+Signing out clears the cached schedules, and so does a 401 — the likeliest
+reason a code is revoked mid-event is that the phone holding it went missing.
+Being offline does not trigger that path, so the offline cache survives bad
+wifi.
 
 ### 8. `[ ]` Build code management in the admin panel
 

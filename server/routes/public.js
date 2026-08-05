@@ -5,19 +5,41 @@ import {
   listTeamMembers,
 } from '../lib/queries.js';
 import { scheduleUpdatedAt, db } from '../db.js';
-import { lookupCode } from '../lib/access-codes.js';
 import {
   requireViewer,
   resolveViewerSession,
   issueViewerSession,
   clearViewerSession,
   scheduleSessionFor,
-  codeAttemptBlocked,
-  recordCodeFailure,
-  clearCodeFailures,
-  retryAfterSeconds,
+  redeemCode,
   markUsed,
 } from '../lib/viewer-auth.js';
+
+/**
+ * One message per failure reason. Distinct on purpose: "that code was replaced"
+ * and "we don't recognise that code" send someone to two different
+ * conversations at the check-in desk, and telling them apart costs nothing —
+ * you have to already hold a code to learn that it was revoked.
+ */
+export const SIGN_IN_MESSAGE = {
+  invalid: "We don't recognise that code.",
+  revoked: 'That code has been replaced. Check for a newer link.',
+  orphaned: 'That code points at something no longer on the roster.',
+  rate: 'Too many incorrect codes. Try again shortly, or ask at the check-in desk.',
+};
+
+/** Does this code still point at something with a schedule? */
+export function subjectResolves(record) {
+  return Boolean(
+    getPersonalizedSchedule(
+      scheduleSessionFor({
+        subjectType: record.subjectType,
+        subjectId: record.subjectId,
+        personId: null,
+      })
+    )
+  );
+}
 
 /**
  * The viewer API. Everything that returns schedule or roster data sits behind
@@ -41,50 +63,15 @@ export function publicRouter() {
 
   /** Redeem an access code. The only way to obtain a viewer session. */
   router.post('/session', (req, res) => {
-    const ip = req.ip || 'unknown';
-    if (codeAttemptBlocked(ip)) {
-      res.set('Retry-After', String(retryAfterSeconds(ip)));
-      return res.status(429).json({
-        error: 'Too many incorrect codes. Try again shortly, or ask at the check-in desk.',
+    const result = redeemCode(req, res, req.body?.code, { subjectResolves });
+    if (!result.ok) {
+      if (result.retryAfter) res.set('Retry-After', String(result.retryAfter));
+      return res.status(result.status).json({
+        error: SIGN_IN_MESSAGE[result.reason],
+        reason: result.reason,
       });
     }
-
-    const record = lookupCode(req.body?.code);
-
-    if (!record) {
-      recordCodeFailure(ip);
-      return res.status(401).json({ error: 'That code is not valid.', reason: 'invalid' });
-    }
-    if (record.revokedAt) {
-      // A revoked code is a wrong code, but saying so is the difference between
-      // a useful check-in desk conversation and a mystery. Knowing a code is
-      // revoked requires already holding it.
-      recordCodeFailure(ip);
-      return res
-        .status(401)
-        .json({ error: 'That code has been replaced. Check for a newer link.', reason: 'revoked' });
-    }
-
-    const resolved = scheduleSessionFor({
-      subjectType: record.subjectType,
-      subjectId: record.subjectId,
-      personId: null,
-    });
-    if (!getPersonalizedSchedule(resolved)) {
-      recordCodeFailure(ip);
-      return res
-        .status(401)
-        .json({ error: 'That code points at something no longer in the roster.', reason: 'orphaned' });
-    }
-
-    clearCodeFailures(ip);
-    markUsed(record.code);
-    issueViewerSession(res, {
-      code: record.code,
-      subjectType: record.subjectType,
-      subjectId: record.subjectId,
-    });
-    res.json(sessionSummary({ ...record, personId: null }));
+    res.json(sessionSummary({ ...result.record, personId: null }));
   });
 
   /** Who am I? Used on load to decide between the code screen and the schedule. */

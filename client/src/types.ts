@@ -81,10 +81,36 @@ export interface Bootstrap {
 export interface Subject {
   id: string;
   name: string;
-  kind: 'team' | 'person';
+  kind: 'team' | 'person' | 'role';
   roleLabel?: string;
   teamName?: string | null;
 }
+
+/** What the server says about the current session. */
+export interface ViewerSession {
+  subjectType: TargetType;
+  identified: boolean;
+  /** A team code lands on "which dancer are you?" before showing a schedule. */
+  needsIdentity: boolean;
+  subject: Subject | null;
+}
+
+export interface TeamMember {
+  id: string;
+  name: string;
+}
+
+/**
+ * Why sign-in isn't happening. `expired` and `network` are client-side
+ * conclusions; the rest come back from the server as `reason`.
+ */
+export type SignInReason =
+  | 'invalid'
+  | 'revoked'
+  | 'orphaned'
+  | 'rate'
+  | 'expired'
+  | 'network';
 
 export interface SchedulePayload {
   session: { type: Selector; id: string };
@@ -96,12 +122,6 @@ export interface SchedulePayload {
   fetchedAt: string;
 }
 
-export interface StoredSession {
-  type: Selector;
-  id: string;
-  roleId: string;
-  label: string;
-}
 
 export interface EditLogEntry {
   id: string;

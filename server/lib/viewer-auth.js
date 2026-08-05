@@ -180,4 +180,44 @@ export function markUsed(code) {
   }
 }
 
+/**
+ * Redeem a code and establish a session. Shared by the manual entry box
+ * (POST /api/session) and the magic link (GET /s/:code) so the two cannot drift
+ * apart — a bug fixed in one would otherwise survive in the other, and the
+ * magic link is the path almost everyone actually uses.
+ *
+ * Returns a discriminated result rather than writing a response, because the
+ * two callers answer differently: one with JSON, one with a redirect.
+ */
+export function redeemCode(req, res, rawCode, { subjectResolves }) {
+  const ip = req.ip || 'unknown';
+
+  if (codeAttemptBlocked(ip)) {
+    return { ok: false, status: 429, reason: 'rate', retryAfter: retryAfterSeconds(ip) };
+  }
+
+  const record = lookupCode(rawCode);
+  if (!record) {
+    recordCodeFailure(ip);
+    return { ok: false, status: 401, reason: 'invalid' };
+  }
+  if (record.revokedAt) {
+    recordCodeFailure(ip);
+    return { ok: false, status: 401, reason: 'revoked' };
+  }
+  if (!subjectResolves(record)) {
+    recordCodeFailure(ip);
+    return { ok: false, status: 401, reason: 'orphaned' };
+  }
+
+  clearCodeFailures(ip);
+  markUsed(record.code);
+  issueViewerSession(res, {
+    code: record.code,
+    subjectType: record.subjectType,
+    subjectId: record.subjectId,
+  });
+  return { ok: true, record };
+}
+
 export { COOKIE as VIEWER_COOKIE, TTL_MS as VIEWER_TTL_MS, nowIso };

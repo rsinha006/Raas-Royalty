@@ -7,6 +7,7 @@ import cookieParser from 'cookie-parser';
 
 import { publicRouter } from './routes/public.js';
 import { adminRouter } from './routes/admin.js';
+import { magicLinkRouter } from './routes/magic-link.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLIENT_DIST = path.join(__dirname, '..', 'client', 'dist');
@@ -40,6 +41,8 @@ export function createApp({ broadcast = () => {}, serveClient = true } = {}) {
 
   app.use('/api', publicRouter());
   app.use('/api/admin', adminRouter({ broadcast }));
+  // Before the SPA fallback: /s/:code must sign in and redirect, not render.
+  app.use('/s', magicLinkRouter());
 
   app.use((err, req, res, next) => {
     if (err?.code === 'LIMIT_FILE_SIZE') {

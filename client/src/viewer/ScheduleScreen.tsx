@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiError } from '../api';
 import { useLive, useTicker } from '../live';
-import { cacheSchedule, readCachedSchedule } from '../session';
-import type { Block, SchedulePayload, StoredSession } from '../types';
+import { cacheSchedule, readAnyCachedSchedule } from '../session';
+import type { Block, SchedulePayload } from '../types';
 import {
   buildTimeline,
   currentTime,
@@ -49,11 +49,13 @@ function diffBlocks(prev: Block[], next: Block[]): ChangeSet {
 }
 
 export default function ScheduleScreen({
-  session,
   onSwitch,
+  switchLabel,
+  onSessionLost,
 }: {
-  session: StoredSession;
   onSwitch: () => void;
+  switchLabel: string;
+  onSessionLost: () => void;
 }) {
   const [payload, setPayload] = useState<SchedulePayload | null>(null);
   const [stale, setStale] = useState(false);
@@ -67,9 +69,8 @@ export default function ScheduleScreen({
 
   const load = useCallback(async () => {
     try {
-      const data = await api.get<SchedulePayload>(
-        `/api/schedule?type=${encodeURIComponent(session.type)}&id=${encodeURIComponent(session.id)}`
-      );
+      // No parameters: the server derives the subject from the session cookie.
+      const data = await api.get<SchedulePayload>('/api/schedule');
       const prev = payloadRef.current;
       if (prev) {
         const delta = diffBlocks(prev.blocks, data.blocks);
@@ -85,6 +86,12 @@ export default function ScheduleScreen({
       setStale(false);
       setError(null);
     } catch (err) {
+      // 401 means the session died under us — most likely the code was revoked
+      // mid-event. That needs the code screen, not an offline banner.
+      if (err instanceof ApiError && err.status === 401) {
+        onSessionLost();
+        return;
+      }
       // 404 means the roster no longer has this selection — that's not an
       // offline condition, it needs a re-pick.
       if (err instanceof ApiError && err.status === 404) {
@@ -92,7 +99,7 @@ export default function ScheduleScreen({
         return;
       }
       if (!payloadRef.current) {
-        const cached = readCachedSchedule(session.type, session.id);
+        const cached = readAnyCachedSchedule();
         if (cached) {
           payloadRef.current = cached;
           setPayload(cached);
@@ -104,7 +111,7 @@ export default function ScheduleScreen({
       }
       setStale(true);
     }
-  }, [session.type, session.id]);
+  }, [onSessionLost]);
 
   // Reset when the identity changes.
   useEffect(() => {
@@ -135,7 +142,7 @@ export default function ScheduleScreen({
         <h1 style={{ fontSize: 24 }}>That entry is no longer on the roster</h1>
         <p className="landing-sub">Logistics may have renamed or removed it. Pick again to continue.</p>
         <button className="btn primary block-w" onClick={onSwitch}>
-          Choose again
+          {switchLabel}
         </button>
       </div>
     );
@@ -152,7 +159,7 @@ export default function ScheduleScreen({
               Try again
             </button>
             <button className="btn ghost block-w" onClick={onSwitch}>
-              Pick a different name
+              {switchLabel}
             </button>
           </div>
         </div>
@@ -181,7 +188,7 @@ export default function ScheduleScreen({
             </div>
           </div>
           <button className="btn sm ghost" onClick={onSwitch}>
-            Switch
+            {switchLabel}
           </button>
         </div>
         <div className="row tiny faint" style={{ marginTop: 8 }}>

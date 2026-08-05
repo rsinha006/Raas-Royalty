@@ -252,7 +252,7 @@ npm run codes -- --check    # coverage; exits 1 if anything is missing
 Codes are still decorative until item 6: `/api/schedule` remains open and
 `/api/bootstrap` still returns the whole roster.
 
-### 6. `[ ]` Enforce codes server-side ⚠️ security-critical
+### 6. `[x]` Enforce codes server-side ⚠️ security-critical
 
 Code → signed session cookie. `/api/schedule` restricted to the session's own
 subject. `/api/bootstrap` removed or gutted so the roster isn't enumerable.
@@ -263,6 +263,44 @@ Rate-limit code attempts.
   code?"*
 - **Done when:** a request without a valid session cannot retrieve any schedule
   or roster data, and that's covered by a test.
+
+**Done 2026-08-05** — `server/lib/viewer-auth.js`, rewritten
+`server/routes/public.js`, 21 tests in `tests/authorization.test.js`.
+
+```bash
+npm test
+```
+
+`/api/schedule` **reads no query parameters**. The subject comes from the
+session and nothing else, so there is no id left to tamper with. Cross-subject
+access is blocked at four independent layers, each re-checked per request:
+cookie signature, the authorizing code still being live, the subject still
+existing, and an identified person still belonging to the team that vouched for
+them. The last two matter because a signed cookie is self-contained — without
+them, "revoke" would only stop new sign-ins.
+
+`/api/bootstrap` returns the event name and nothing else. It used to return
+every role, team, and person, which was a one-request roster dump.
+
+**Residual issues, deliberately not fixed here:**
+
+- ⚠️ **Socket.IO CORS is `origin: true, credentials: true`** — any origin can
+  open an authenticated socket. Harmless while broadcasts carry only
+  `{updatedAt, reason, changedBlockIds}`; **becomes a leak in item 11**, which
+  puts audience information into those payloads. Tighten it there.
+- **Codes never expire.** Revocation is the only control; the access-code design
+  called for an event-scoped lifetime too. Add a cutoff or bulk-revoke — item 22.
+- **`trust proxy` defaults to 1**, so IP rate limiting is bypassable if the
+  process is exposed without a proxy. Configurable via `TRUST_PROXY`; verify at
+  deploy. The 8-character keyspace, not the limiter, is the primary defence.
+- **The identity step is not a security boundary** — a team code can select any
+  name on that team and read that person's blocks. Intended; see
+  `docs/decisions.md`. Item 6's review should not re-flag it.
+
+**The viewer landing screen is a placeholder** until item 7. It says schedules
+are private and to open your link; there is no way to sign in from it yet. The
+old role picker is gone (`Landing.tsx` deleted) because it depended on the
+roster dump. Admin panel is unaffected.
 
 ### 7. `[ ]` Rebuild the landing flow as code entry + magic links
 
@@ -308,9 +346,15 @@ do when something looks stale.
 
 ### 11. `[ ]` Scope broadcasts to the affected audience
 
-Every change currently makes all ~170 clients refetch. The audience
+Every change currently makes all ~280 clients refetch. The audience
 (`personIds` / `teamIds`) is already computed for the edit log — put it in the
 broadcast and let clients ignore changes that don't affect them.
+
+⚠️ **Lock down the Socket.IO origin in the same change.** It is currently
+`{ origin: true, credentials: true }` — any site can open an authenticated
+socket. That is survivable only because broadcasts carry no personal data today.
+Putting `personIds` into the payload without fixing the origin turns a shrug
+into a leak.
 
 ### 12. `[ ]` Build the template importer
 
@@ -475,7 +519,8 @@ for "I lost my link" at the check-in desk.
 
 | Risk | Mitigation | Item |
 | --- | --- | --- |
-| Access codes look enforced but aren't | Server-side session check + security review + tests | 6 |
+| ~~Access codes look enforced but aren't~~ | Closed — subject derives from the session only, 21 authorization tests | 6 |
+| Socket CORS reflects any origin, and item 11 adds data to broadcasts | Lock the origin down as part of item 11, not after | 11 |
 | Reload while offline shows a browser error | Service worker | 10 |
 | Timezone silently shifts every time shown | Server-authoritative timezone | 9 |
 | Real spreadsheet doesn't match the template | Logistics authors in our template; importer validates and rejects loudly | 12 |

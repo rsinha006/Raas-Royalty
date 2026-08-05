@@ -1,75 +1,34 @@
 import http from 'node:http';
-import path from 'node:path';
-import fs from 'node:fs';
-import { fileURLToPath } from 'node:url';
 
 import 'dotenv/config';
-import express from 'express';
-import cookieParser from 'cookie-parser';
 import { Server as SocketServer } from 'socket.io';
 
 import { dbPath, scheduleUpdatedAt } from './db.js';
-import { publicRouter } from './routes/public.js';
-import { adminRouter } from './routes/admin.js';
+import { createApp } from './app.js';
 import { clearChangeFlags } from './lib/mutations.js';
 import { startPolling, syncStatus } from './sync/index.js';
 import { usingDefaultPassword } from './lib/auth.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 4000);
-const CLIENT_DIST = path.join(__dirname, '..', 'client', 'dist');
-
-const app = express();
-app.set('trust proxy', 1);
-app.use(express.json({ limit: '2mb' }));
-app.use(cookieParser());
-
-const server = http.createServer(app);
-const io = new SocketServer(server, {
-  cors: { origin: true, credentials: true },
-});
 
 /**
  * One broadcast channel for everyone. Payloads carry only the fact that
- * something changed plus the affected block ids — clients refetch their own
- * personalized slice, so no one receives another person's schedule.
+ * something changed — never schedule content — so an unauthenticated socket
+ * learns that *a* change happened and nothing about it. Clients refetch their
+ * own personalized slice through /api/schedule, which requires a session.
  */
+let io;
 function broadcast(event, payload) {
-  io.emit(event, { ...payload, at: new Date().toISOString() });
+  io?.emit(event, { ...payload, at: new Date().toISOString() });
 }
 
+const app = createApp({ broadcast });
+const server = http.createServer(app);
+
+io = new SocketServer(server, { cors: { origin: true, credentials: true } });
 io.on('connection', (socket) => {
   socket.emit('hello', { updatedAt: scheduleUpdatedAt() });
 });
-
-app.use('/api', publicRouter());
-app.use('/api/admin', adminRouter({ broadcast }));
-
-app.use((err, req, res, next) => {
-  if (err?.code === 'LIMIT_FILE_SIZE') {
-    return res.status(413).json({ error: 'That file is too large (8 MB limit).' });
-  }
-  console.error('[error]', err);
-  res.status(500).json({ error: err.message || 'Unexpected server error' });
-});
-
-/* --------------------------- static client --------------------------- */
-
-if (fs.existsSync(CLIENT_DIST)) {
-  app.use(express.static(CLIENT_DIST, { index: false, maxAge: '1h' }));
-  // SPA fallback — /admin and any deep link render the same bundle.
-  app.get('*', (req, res, next) => {
-    if (req.path.startsWith('/api')) return next();
-    res.sendFile(path.join(CLIENT_DIST, 'index.html'));
-  });
-} else {
-  app.get('/', (req, res) => {
-    res
-      .status(200)
-      .type('text/plain')
-      .send('API is running. Client not built yet — run `npm run build`, or `npm run dev` for the Vite dev server.');
-  });
-}
 
 /* --------------------------- background --------------------------- */
 

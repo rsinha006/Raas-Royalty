@@ -27,10 +27,22 @@ export function usingDefaultPassword() {
   return !process.env.ADMIN_PASSWORD;
 }
 
-function sign(payload) {
+/**
+ * Shared with the viewer session in viewer-auth.js on purpose: one secret, one
+ * signing implementation, one place to get constant-time comparison right.
+ */
+export function signPayload(payload) {
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
   const sig = crypto.createHmac('sha256', secret()).update(body).digest('base64url');
   return `${body}.${sig}`;
+}
+
+export function verifyPayload(token) {
+  return verify(token);
+}
+
+function sign(payload) {
+  return signPayload(payload);
 }
 
 function verify(token) {

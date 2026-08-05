@@ -140,18 +140,27 @@ export function listDays() {
  * Small enough to cache offline in full.
  */
 export function getBootstrap() {
-  const roles = listRoles();
-  const teams = listTeams();
-  const people = listPeople();
+  // Deliberately almost empty. This used to return every role, every team and
+  // every person's name and id — enough to enumerate the entire roster with one
+  // unauthenticated GET, and enough to then pull any of their schedules. The
+  // landing page needs the event's name to render and nothing else; everything
+  // identifying now arrives only after a code is redeemed.
   return {
     eventName: getMeta('event_name', 'Royalty Dance Competition'),
-    roles,
-    teams,
-    // Only the fields the picker needs — no contact details leak before selection.
-    people: people.map((p) => ({ id: p.id, name: p.name, roleId: p.roleId, teamId: p.teamId })),
-    days: listDays(),
     updatedAt: scheduleUpdatedAt(),
   };
+}
+
+/**
+ * Names on one team, for the "which dancer are you?" step. The narrowest
+ * enumeration the product needs: it is reachable only with that team's code,
+ * and it exposes nothing the code did not already entitle the holder to.
+ */
+export function listTeamMembers(teamId) {
+  return db
+    .prepare('SELECT id, name FROM people WHERE team_id = ? ORDER BY name')
+    .all(teamId)
+    .map((p) => ({ id: p.id, name: p.name }));
 }
 
 /* ------------------------------------------------------------------ *
@@ -220,6 +229,22 @@ export function resolveSession({ type, id }) {
       roleId: person.role_id,
       targets,
       contact: shapeContact(db.prepare('SELECT * FROM contact_cards WHERE id = ?').get(contactId)),
+    };
+  }
+
+  if (type === 'role') {
+    // Role-code sessions: one shared code for a group whose schedule holds
+    // nothing personal. Never issued automatically — see docs/decisions.md.
+    const role = db.prepare('SELECT * FROM roles WHERE id = ?').get(id);
+    if (!role) return null;
+    return {
+      kind: 'role',
+      subject: { id: role.id, name: role.label, kind: 'role', roleLabel: role.label },
+      roleId: role.id,
+      targets: [{ type: 'role', id: role.id }],
+      contact: shapeContact(
+        db.prepare('SELECT * FROM contact_cards WHERE id = ?').get(getMeta('default_contact_id'))
+      ),
     };
   }
 

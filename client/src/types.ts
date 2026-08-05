@@ -68,12 +68,13 @@ export interface Block {
   lastChange: string | null;
 }
 
+/**
+ * What an unauthenticated visitor is allowed to know. Roles, teams and people
+ * used to be here; they left with item 6, because together they were a
+ * one-request dump of the whole roster.
+ */
 export interface Bootstrap {
   eventName: string;
-  roles: Role[];
-  teams: Team[];
-  people: PersonLite[];
-  days: EventDay[];
   updatedAt: string;
 }
 

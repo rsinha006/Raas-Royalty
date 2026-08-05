@@ -1,14 +1,32 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
-import { clearSession, loadSession, saveSession } from '../session';
+import { clearSession, loadSession } from '../session';
 import type { Bootstrap, StoredSession } from '../types';
-import Landing from './Landing';
 import ScheduleScreen from './ScheduleScreen';
 
 const BOOTSTRAP_CACHE = 'royalty.bootstrap.v1';
 
+/**
+ * Sessions used to be a locally-stored "I picked this team" with no server
+ * involvement. They are now issued by the server against an access code, so any
+ * pre-existing selection is meaningless and its schedule requests would 401.
+ * Drop it once, on load, rather than letting a returning visitor land on an
+ * error screen they cannot get out of.
+ */
+function discardPreCodeSession(): StoredSession | null {
+  const stored = loadSession();
+  if (!stored) return null;
+  clearSession();
+  try {
+    localStorage.removeItem(BOOTSTRAP_CACHE);
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 export default function Viewer() {
-  const [session, setSession] = useState<StoredSession | null>(() => loadSession());
+  const [session, setSession] = useState<StoredSession | null>(discardPreCodeSession);
   const [bootstrap, setBootstrap] = useState<Bootstrap | null>(null);
   const [bootError, setBootError] = useState<string | null>(null);
 
@@ -44,11 +62,6 @@ export default function Viewer() {
     if (!session) fetchBootstrap();
   }, [session, fetchBootstrap]);
 
-  const handleSelect = (next: StoredSession) => {
-    saveSession(next);
-    setSession(next);
-  };
-
   const handleSwitch = () => {
     clearSession();
     setSession(null);
@@ -75,10 +88,26 @@ export default function Viewer() {
     return (
       <div className="loading-screen">
         <span className="spinner" />
-        <span>Loading the roster…</span>
+        <span>Loading…</span>
       </div>
     );
   }
 
-  return <Landing bootstrap={bootstrap} onSelect={handleSelect} />;
+  // Placeholder, not the finished screen. The server now requires an access
+  // code for every schedule read, and the code-entry and magic-link flow that
+  // replaces the old role picker is the next piece of work. Deliberately says
+  // nothing about who is on the roster.
+  return (
+    <div className="landing">
+      <div className="crown">♛</div>
+      <h1>{bootstrap.eventName}</h1>
+      <p className="landing-sub">
+        Schedules are private to each team and staff member. Open the personal
+        link you were sent to see yours.
+      </p>
+      <p className="landing-sub" style={{ opacity: 0.7, fontSize: 13 }}>
+        Lost your link? Ask at the check-in desk.
+      </p>
+    </div>
+  );
 }

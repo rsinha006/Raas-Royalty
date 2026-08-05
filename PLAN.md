@@ -26,7 +26,31 @@ recovery from a stale saved session.
 access control on the viewer.
 
 Phase A items 1–3 are done. The open decisions are resolved (see below); items 12
-and 13 were reshaped by them. Next up is item 4, then Phase B.
+and 13 were reshaped by them.
+
+### Build order
+
+`templates/royalty-schedule-template.xlsx` is still being iterated by logistics.
+It blocks **item 12 only**, plus the parts of 19 and 24 that depend on it.
+Everything else proceeds now, in this order:
+
+1. **Item 4** — anonymized fixtures. Derived from `samples/`, not the template.
+2. **Phase B (5–8)** — access codes. Largest remaining chunk, security-critical,
+   template-independent.
+3. **Items 9, 13, 11, 14, 10** — timezone, the two schema columns, scoped
+   broadcasts, correctness gaps, service worker.
+4. **Phase D (15–18)** — admin tooling.
+5. **Item 12 last**, against a frozen template.
+
+Item 12 splits: only the tab readers depend on the template's shape. Diff
+classification, apply, the `ingest()` contract, and validation reporting can be
+built now. Same for item 19 — time parsing, midnight handling, diff
+classification, and the authorization negatives are all testable today.
+
+⚠️ **The template is still on the critical path for the dress rehearsal
+(item 26)** even though it is built last, because nothing can be demonstrated
+end-to-end with real data until it lands. Track it as a dated dependency. If it
+isn't final by T-2 weeks, the rehearsal is at risk no matter what else is done.
 
 ### Architecture in one paragraph
 
@@ -48,7 +72,7 @@ Summary, with the item each one now constrains:
 | Decision | Resolution | Constrains |
 | --- | --- | --- |
 | Access-code granularity | Per-team for dancers, per-person for staff. Role codes are a deliberate exception, not a default. | 5, 6, 8, 25 |
-| Data model | Model fits, except: `person_roles` join table, `teams.show_order`, `people.is_captain`. | 13 |
+| Data model | Model fits. Two additive columns only: `teams.show_order`, `people.is_captain`. One role per person. | 13 |
 | Judges | Running order + a few role-targeted blocks. No authored per-judge schedule. | 13, 24 |
 | Schedule source of truth | Logistics fills `templates/royalty-schedule-template.xlsx`; the app imports it. Admin panel is source of truth for live changes only. | 12, 24 |
 | Event timezone | Server-authoritative. `America/Indiana/Indianapolis` (Bloomington, IN) — IANA name, never a fixed offset. | 9, 24 |
@@ -58,14 +82,15 @@ One value is still pending but not blocking, because it is data rather than
 design: the real **event dates**. Not locked as of 2026-08-05 — the 2026-08-07 in
 the seed and in the template is a placeholder. Settle before item 24.
 
-Three questions remain open for the event director. None block engineering:
+The three questions that needed the event director were answered 2026-08-05, all
+in the direction of less work:
 
-1. Does `*` / `**` on the roster mean captain? (We import it as one, flagged for
-   review — `people.is_captain` exists either way.)
-2. Is `Ashka Patel` one person in two roles, or two people who share a name?
-   (We support two roles regardless.)
-3. Will logistics accept the template, or push back on it? (Worth confirming
-   early — it is the load-bearing assumption behind item 12.)
+1. **`*` / `**` on the roster marks food restrictions, not captains.** Irrelevant
+   to this app. The importer's only duty is to strip it from names.
+2. **Every person holds exactly one role.** `Ashka Patel` is two people sharing a
+   name. No `person_roles` join table — `people.role_id` stays single-valued.
+3. **The template is ours to iterate**, not something logistics might reject.
+   They will keep revising it until they have a copy they like.
 
 ---
 
@@ -240,15 +265,24 @@ Not a column-mapping UI and not a general grid decoder; see the source-of-truth
 decision. But the messy-input handling from the analysis still applies, because
 Roster and People are pasted in from the same sources as last year: normalize
 phone numbers to digits (four formats, including invisible Unicode direction
-marks), trim trailing spaces on names, inherit meridiem from end time to start,
-and tiebreak within-team name collisions.
+marks), trim trailing spaces on names, strip the `*` / `**` food-restriction
+suffix from names, inherit meridiem from end time to start, and tiebreak
+within-team name collisions — which are real people, not duplicates.
+
+**Build the format-independent half first** — diff classification, apply, the
+`ingest()` contract, validation reporting. Only the tab readers need a frozen
+template.
 
 ### 13. `[ ]` Apply model changes from item 3
 
-Bounded, per the data-model decision: a `person_roles` join table replacing
-single `people.role_id` (personalization matches `role_id IN (…)`),
-`teams.show_order`, and `people.is_captain`. No divisions, no multi-team dancers,
-no second performance.
+Two additive columns, per the data-model decision: `teams.show_order` (1–8,
+nullable until the draw) and `people.is_captain` (from the template's `Captain?`
+column). No divisions, no multi-team dancers, no second performance, and **no
+multi-role support** — every person holds exactly one role.
+
+Captains hold the Dancer role like everyone else, so captain-only blocks reach
+them by the importer expanding a captain-targeted row into person blocks using
+`is_captain` — not a fourth targeting mode, and not a Captain role.
 
 ### 14. `[ ]` Fix the known correctness gaps
 
@@ -386,7 +420,7 @@ for "I lost my link" at the check-in desk.
 | Reload while offline shows a browser error | Service worker | 10 |
 | Timezone silently shifts every time shown | Server-authoritative timezone | 9 |
 | Real spreadsheet doesn't match the template | Logistics authors in our template; importer validates and rejects loudly | 12 |
-| Logistics rejects the template and sends a wall chart | Confirm with the director early; the fallback is expensive | 3, 12 |
+| Template isn't final in time to rehearse against | Track it as a dated dependency, not a background task; T-2 weeks is the drop-dead | 12, 26 |
 | Dancer schedules have no source and never get authored | Named owner for the content work at item 24 | 24 |
 | ~~Late schema change forces rework~~ | Closed — model confirmed against past-year data | 2, 3 |
 | Thundering herd on every change | Audience-scoped broadcasts + load test | 11, 20 |

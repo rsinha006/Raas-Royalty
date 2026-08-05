@@ -67,7 +67,8 @@ to the live schedule.
 ---
 
 ## Data model: what the past-year data settled
-**Date:** 2026-08-05 · **Status:** decided
+**Date:** 2026-08-05 · **Status:** decided · **amended 2026-08-05** — see the
+inline corrections below, which resolve two inferences the director overruled.
 
 **Question.** PLAN.md open decision 2 — six questions about the shape of the
 data, held open because getting them wrong means a late schema change.
@@ -78,37 +79,56 @@ See [sample-data-analysis.md](sample-data-analysis.md) for the evidence.
 | Question | Answer |
 | --- | --- |
 | Can a dancer compete with two teams? | **No.** `people.team_id` stays single-valued. |
-| Does anyone hold two roles? | **Yes.** Needs a schema change — see below. |
+| Does anyone hold two roles? | **No.** Exactly one role each — director-confirmed. |
 | Divisions or brackets above teams? | **No.** But teams carry a show order. |
 | Does a team perform more than once? | **No.** One performance, running order 1–8. |
 | Do judges need the running order or a scoring block? | **Neither, exactly** — see the judges entry below. |
 | Is anything scheduled per-person within a team? | **Yes.** Captains and airport travellers. |
 
-Schema consequences, to be applied in item 13:
+Schema consequences, to be applied in item 13 — two additive columns, nothing
+else:
 
-- **`person_roles` join table** replacing the single `people.role_id`.
-  Personalization in `queries.js` matches `role_id IN (…)` instead of `=`.
 - **`teams.show_order`** — integer 1–8, nullable until the draw. Worth
   surfacing on a dancer's phone ("you are 3rd, after UTD").
 - **`people.is_captain`** — captains are a real scheduling unit (Captain's
-  Meeting, a distinct `CAPTAINS` bussing group), and the new import template
-  already carries a `Captain?` column.
-- **No change** to block targeting. Three-way team/person/role already covers
-  captains (a role) and airport travellers (person-blocks); what has to change
-  is that the *import path* must emit person-level blocks from team-shaped
-  source rows.
+  Meeting, a distinct `CAPTAINS` bussing group), and the import template carries
+  a `Captain?` column that logistics fills in directly.
+- **No `person_roles` join table.** `people.role_id` stays single-valued.
+- **No change** to block targeting. Three-way team/person/role still covers
+  everything; what has to change is that the *import path* must emit
+  person-level blocks from team-shaped source rows.
 
-**Why.** Two roles per person is the only one of these that costs anything, and
-the past-year sheet shows it plainly — one name appearing under both Logistics
-and Judging on every day tab, with different activities in each row. There is a
-residual chance it's two people who share a name (the roster has several genuine
-within-team name collisions), but a join table is cheap now and a migration
-during event week is not, so we design for it either way rather than waiting for
-the director to confirm.
+**Why.** Two of these were inferences from the past-year sheet that the director
+overruled on 2026-08-05, both in the direction of *less* work:
+
+**One role per person.** The analysis found `Ashka Patel` appearing under both
+Logistics and Judging on every day tab and inferred one person holding two roles.
+It is two different people who share a name — the same within-team name-collision
+pattern the roster shows elsewhere. Every participant holds exactly one role, so
+the `person_roles` join table this entry originally called for is not built.
+`role_id` stays a single column and personalization keeps matching `=`.
+
+The mixer task layer (`MIXER TASK SHEET` assigning `DIRECTOR`, `LOGS`,
+`CREATIVE`, `PR`) is not a second role either — those are activities, and they
+reach people as ordinary person-targeted blocks.
+
+**Captains are not marked by the asterisk.** The analysis inferred that the
+`*` / `**` suffix on ~27 roster names meant captain, on a count match with the
+per-team captain number. It marks **food restrictions** and is irrelevant to this
+app. `people.is_captain` survives, but it is populated from the template's
+explicit `Captain?` column, not derived from name suffixes. The importer's only
+duty toward the asterisk is to **strip it from names** — `Aaryan *` is a person
+called Aaryan.
+
+Captains still need blocks (the Friday Captain's Meeting) despite holding the
+Dancer role like everyone else. The importer expands a captain-targeted source
+row into person-level blocks using `is_captain`, rather than adding a fourth
+targeting mode or making Captain a role — the latter would break "exactly one
+role" and cut captains off from dancer-role blocks.
 
 Everything else was a relief: the model already fits. The expensive risk in
-PLAN.md's risk table — "late schema change forces rework" — is now bounded to
-one join table and two columns.
+PLAN.md's risk table — "late schema change forces rework" — is closed, and the
+remaining change is two nullable columns.
 
 ---
 
@@ -257,3 +277,45 @@ event. It also moves item 25 — 280 access links to generate and distribute, no
 
 **Pending:** this year's actual headcount, once the rosters land. It changes the
 number, not the decision.
+
+---
+
+## The template iterates on its own track; the app does not wait for it
+**Date:** 2026-08-05 · **Status:** decided
+
+**Question.** `templates/royalty-schedule-template.xlsx` is not final — logistics
+will keep revising it until they have a copy they like. Does engineering wait for
+that, or build around it?
+
+**Decision.** Build around it. The template blocks exactly **one** item — 12, the
+importer — plus the parts of 19 and 24 that depend on it. Everything else
+proceeds now, in this order:
+
+1. **Item 4**, anonymized fixtures. Derived from `samples/`, not the template.
+2. **Phase B** (5–8), access codes. The largest remaining chunk, the one flagged
+   security-critical, and entirely template-independent.
+3. **Items 9, 13, 11, 14, 10** — timezone, the two schema columns, scoped
+   broadcasts, correctness gaps, service worker. All independent.
+4. **Phase D** (15–18), admin tooling.
+5. **Item 12 last**, against a frozen template.
+
+Within item 12, only the tab readers depend on the template's shape. The existing
+pipeline — `bytes → parseTabular → normalizeScheduleRows → computeScheduleDiff →
+apply` — is format-dependent only in its first two stages. Diff classification,
+apply, the `ingest()` contract, and the validation-reporting surface can all be
+built and tested now. The same split applies to item 19: time parsing, midnight
+handling, diff classification, and the access-code authorization negatives are
+all testable against fixtures today; only the tab-reading tests wait.
+
+**Why.** The alternative is idle time on a fixed event date, which is the one
+resource this project cannot buy more of. The risk being accepted is rework in
+item 12 if the template churns late — bounded, because it is confined to the
+readers, and because we control the file rather than reverse-engineering someone
+else's.
+
+The cost is that the app cannot be demonstrated end-to-end with real data until
+the template lands, so **the template is on the critical path for the dress
+rehearsal (item 26) even though it is last in the build order.** Track its
+progress as a dependency with a date, not as a background task. If it is not
+final by T-2 weeks, the rehearsal is at risk regardless of how much else is
+finished.

@@ -15,6 +15,7 @@
     "start": "node server/index.js",
     "seed": "node server/seed.js",
     "seed:reset": "node server/seed.js --reset",
+    "codes": "node server/codes.js",
     "postinstall": "npm --prefix client install"
   },
   "dependencies": {

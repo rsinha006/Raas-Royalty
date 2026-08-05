@@ -218,12 +218,39 @@ Three things worth knowing:
 
 ## Phase B — Access codes
 
-### 5. `[ ]` Add the access-code schema and generator
+### 5. `[x]` Add the access-code schema and generator
 
 `access_codes` table: code, subject type, subject id, created, last used,
 revoked. Migration backfills codes for the existing roster.
 
 - **Done when:** every team and person has a code, and codes survive a re-seed.
+
+**Done 2026-08-05** — `access_codes` in `server/schema.sql`,
+`server/lib/access-codes.js`, CLI at `server/codes.js`.
+
+```bash
+npm run codes -- --list     # every live code and its subject
+npm run codes -- --check    # coverage; exits 1 if anything is missing
+```
+
+- **Dancers deliberately get no personal code**, which narrows the "every
+  person" in the done-when above. They reach their schedule through their team's
+  code plus the identity step; issuing ~190 individual dancer codes would mean
+  that many live credentials nobody distributes and nobody revokes. Teams and
+  staff get codes; roles are supported but never issued automatically.
+- **8 characters** from a 30-character alphabet with no `0/O`, `1/I/L`, or `U`.
+  Longer than the "short, typeable" sketch above because the code is normally a
+  link and typed only when setting up a second device — so a bug in item 6's
+  rate limiter isn't by itself enough to enumerate the roster.
+- **One live code per subject is a database constraint**, not a convention:
+  a partial unique index on `(subject_type, subject_id) WHERE revoked_at IS
+  NULL`. Regenerating revokes and re-inserts, so revoked rows stay as an audit
+  trail — "was this leaked code used before we killed it?" stays answerable.
+- **Backfill is idempotent**, so `npm run seed` on a populated database is the
+  migration and never rotates a code that has already gone out.
+
+Codes are still decorative until item 6: `/api/schedule` remains open and
+`/api/bootstrap` still returns the whole roster.
 
 ### 6. `[ ]` Enforce codes server-side ⚠️ security-critical
 

@@ -8,6 +8,7 @@
  */
 import { db, newId, nowIso, touchScheduleVersion, setMeta } from './db.js';
 import { logEdit } from './lib/mutations.js';
+import { backfillAccessCodes } from './lib/access-codes.js';
 
 const RESET = process.argv.includes('--reset');
 
@@ -64,13 +65,21 @@ if (RESET) {
     DELETE FROM event_days;
     DELETE FROM roles;
     DELETE FROM meta;
+    DELETE FROM access_codes;
   `);
   console.log('Cleared existing data.');
 }
 
 const existing = db.prepare('SELECT COUNT(*) AS n FROM people').get().n;
 if (existing > 0 && !RESET) {
+  // Not a no-op any more: this is the migration path. An existing database
+  // predates access codes, so backfill it rather than bailing out. Idempotent,
+  // so it never rotates a code that has already been distributed.
+  const codes = backfillAccessCodes({}, { editedBy: 'seed', source: 'seed' });
   console.log(`Database already has ${existing} people. Use --reset to rebuild.`);
+  console.log(
+    `Access codes: ${codes.created} issued, ${codes.kept} already present (${codes.total} subjects).`
+  );
   process.exit(0);
 }
 
@@ -313,7 +322,13 @@ const seed = db.transaction(() => {
 });
 
 const stats = seed();
+const codes = backfillAccessCodes({}, { editedBy: 'seed', source: 'seed' });
+
 console.log(
   `Seeded ${stats.people} people across ${stats.teams} teams, ${stats.blocks} schedule blocks.`
 );
 console.log('Roles: Dancer, Exec Board, Judge, Videographer, Sponsor, Logistics & Admin');
+console.log(
+  `Access codes: ${codes.created} issued across ${codes.total} subjects ` +
+    '(one per team, one per staff member; dancers use their team code).'
+);

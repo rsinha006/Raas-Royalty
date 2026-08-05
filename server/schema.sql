@@ -97,3 +97,31 @@ CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,
   value TEXT
 );
+
+-- Access codes are bearer tokens: holding one grants read access to that
+-- subject's schedule and contact details. Stored in plaintext on purpose —
+-- admins have to be able to read them back to distribute them, so hashing at
+-- rest would break the product. The compensating controls are rate limiting on
+-- attempts (item 6), one-click revoke, and an event-scoped lifetime.
+--
+-- `subject_id` deliberately has no foreign key: it points at teams, people or
+-- roles depending on `subject_type`. Deleting a subject therefore leaves an
+-- orphaned code — `listCodes()` surfaces those with a null label.
+CREATE TABLE IF NOT EXISTS access_codes (
+  code         TEXT PRIMARY KEY,
+  subject_type TEXT NOT NULL CHECK (subject_type IN ('team', 'person', 'role')),
+  subject_id   TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  last_used_at TEXT,
+  revoked_at   TEXT,
+  note         TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_access_codes_subject
+  ON access_codes(subject_type, subject_id);
+
+-- At most one live code per subject. Regenerating means revoking the old row and
+-- inserting a new one, so revoked codes stay on the table as an audit trail:
+-- "this leaked code was used at 14:02" is answerable after the fact.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_access_codes_one_active
+  ON access_codes(subject_type, subject_id) WHERE revoked_at IS NULL;

@@ -85,15 +85,15 @@ See [sample-data-analysis.md](sample-data-analysis.md) for the evidence.
 | Do judges need the running order or a scoring block? | **Neither, exactly** — see the judges entry below. |
 | Is anything scheduled per-person within a team? | **Yes.** Captains and airport travellers. |
 
-Schema consequences, to be applied in item 13 — two additive columns, nothing
-else:
+Schema consequences, to be applied in item 13:
 
 - **`teams.show_order`** — integer 1–8, nullable until the draw. Worth
   surfacing on a dancer's phone ("you are 3rd, after UTD").
-- **`people.is_captain`** — captains are a real scheduling unit (Captain's
-  Meeting, a distinct `CAPTAINS` bussing group), and the import template carries
-  a `Captain?` column that logistics fills in directly.
-- **No `person_roles` join table.** `people.role_id` stays single-valued.
+- ~~**`people.is_captain`**~~ and ~~**No `person_roles` join table**~~ —
+  **both reversed** by *Captains hold a second role*, below. Captains are
+  modelled as a second role, so the join table is built after all and the
+  boolean is dropped. The template's `Captain?` column is what the importer
+  reads to assign it.
 - **No change** to block targeting. Three-way team/person/role still covers
   everything; what has to change is that the *import path* must emit
   person-level blocks from team-shaped source rows.
@@ -138,6 +138,12 @@ remaining change is two nullable columns.
 **Question.** PLAN.md open decision 1 — teams and individuals map cleanly onto a
 schedule, but roles don't. A single shared "Judge" code lets any judge read any
 other judge's schedule and contact details.
+
+**Amended 2026-08-05** by *Captains hold a second role*, below: a team code now
+lands on a team-scoped "which dancer are you?" step and yields a person session.
+The code count is unchanged; what changes is that a dancer ends up individually
+identified inside their team, which is what makes person-targeted blocks
+(airport pickups) and role-targeted blocks (captains) reach them at all.
 
 **Decision.** One code per **team**, shared within the team by design. One code
 per **staff member** — board, liaison, judge, videographer — not per staff role.
@@ -277,6 +283,69 @@ event. It also moves item 25 — 280 access links to generate and distribute, no
 
 **Pending:** this year's actual headcount, once the rosters land. It changes the
 number, not the decision.
+
+---
+
+## Captains hold a second role, reached through a team-scoped identity step
+**Date:** 2026-08-05 · **Status:** decided
+
+**Question.** Three blocks apply to captains and nobody else — Captains Meeting,
+lighting cues check, judges' meeting. The rest of a captain's weekend is
+identical to any dancer's. How do those three reach them?
+
+**Decision.** Two changes, which only work together:
+
+1. **A team session gains an identity step.** Entering a team code lands on
+   "which dancer are you?", scoped to that team, and the result is a **person
+   session**. The server verifies the chosen person belongs to the team the code
+   authorized.
+2. **Captains hold `Dancer` + `Captain`.** This restores the `person_roles` join
+   table that the data-model entry above deleted. `Captain` is an ordinary row in
+   `roles`, so it needs no deploy. The three captain blocks target
+   `role = Captain`.
+
+`people.is_captain` is **dropped** — membership in the Captain role replaces it.
+The template's `Captain?` column stays; it is what the importer reads to assign
+the second role.
+
+**Why.** `resolveSession` in `server/lib/queries.js` gives a team session the
+targets `[team, dancerRole]` — no person target, and no way to know which of a
+team's 25 dancers is holding the phone. So under per-team codes alone, **no
+captain-specific block of any kind can reach a captain**, role-targeted or not.
+Change 2 without change 1 does nothing.
+
+The same gap silently breaks something we had already committed to: airport
+arrivals and departures are grouped by *flight*, not by team ("UTD & Aryan P",
+"Anaga Srikumar and Nihar Soman"), so individual dancers need person-level
+blocks with pickup times hours apart from their teammates. Those were
+unreachable too. The identity step is not a captain feature; it is what makes
+person-targeting work for dancers at all.
+
+The step is deliberately **not** a security boundary. Anyone holding a team code
+can select any name on that team and read that person's schedule. That is
+already true of a shared team code by design — the code is a bearer token for
+the whole team's data — and teammates knowing each other's flight times is not
+a leak worth engineering against. The boundary that matters is between teams,
+and between dancers and staff; both are unaffected.
+
+**Why a role rather than a flag.** The alternative was `people.is_captain` plus
+an importer that expands one captain-targeted source row into 27 person-blocks.
+Three captain events × 27 captains is 81 rows to bulk-shift when the day runs
+late (item 15), to reverse as a unit (item 17), and to re-create by hand if
+logistics adds a fourth captain block mid-event. That last case is precisely the
+pressure that makes people abandon the app for a group chat. Role targeting is
+one row for all of it.
+
+This does not contradict the director's "everyone holds exactly one role" — that
+is true of the org chart, where nobody is both Logistics and Judging. Captain is
+an overlay on Dancer, not a second seat, and modelling it as a role is an
+internal choice rather than a claim about the roster.
+
+**What it costs.** The `person_roles` join table, a migration, multi-role
+handling in the admin person editor, and an importer that emits two roles for
+anyone marked `Captain?`. Personalization itself is nearly free —
+`blocksForTargets` already ORs an arbitrary target list, so a second role is one
+more entry in `targets`.
 
 ---
 

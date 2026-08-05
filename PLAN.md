@@ -71,8 +71,8 @@ Summary, with the item each one now constrains:
 
 | Decision | Resolution | Constrains |
 | --- | --- | --- |
-| Access-code granularity | Per-team for dancers, per-person for staff. Role codes are a deliberate exception, not a default. | 5, 6, 8, 25 |
-| Data model | Model fits. Two additive columns only: `teams.show_order`, `people.is_captain`. One role per person. | 13 |
+| Access-code granularity | Per-team for dancers, per-person for staff. A team code then asks "which dancer are you?" and yields a person session. | 5, 6, 7, 8, 25 |
+| Data model | `teams.show_order` plus a `person_roles` join table. Captains hold `Dancer` + `Captain`. | 13 |
 | Judges | Running order + a few role-targeted blocks. No authored per-judge schedule. | 13, 24 |
 | Schedule source of truth | Logistics fills `templates/royalty-schedule-template.xlsx`; the app imports it. Admin panel is source of truth for live changes only. | 12, 24 |
 | Event timezone | Server-authoritative. `America/Indiana/Indianapolis` (Bloomington, IN) — IANA name, never a fixed offset. | 9, 24 |
@@ -87,8 +87,10 @@ in the direction of less work:
 
 1. **`*` / `**` on the roster marks food restrictions, not captains.** Irrelevant
    to this app. The importer's only duty is to strip it from names.
-2. **Every person holds exactly one role.** `Ashka Patel` is two people sharing a
-   name. No `person_roles` join table — `people.role_id` stays single-valued.
+2. **Every person holds exactly one role** in the org-chart sense — `Ashka Patel`
+   is two people sharing a name. Captains are the one modelled exception: they
+   hold `Dancer` + `Captain` so that three captain-only blocks can be
+   role-targeted rather than duplicated 27 times.
 3. **The template is ours to iterate**, not something logistics might reject.
    They will keep revising it until they have a copy they like.
 
@@ -218,9 +220,16 @@ Rate-limit code attempts.
 `/s/:code` auto-signs-in. Manual entry box as fallback. Distinct states for
 invalid, revoked, and expired codes.
 
+**A team code lands on a team-scoped "which dancer are you?" step**, and the
+result is a person session — the server verifying the chosen person belongs to
+the authorized team. Staff codes skip the step entirely. Without this, no
+person-targeted block (airport pickups) and no captain role block reaches a
+dancer at all; see the captains decision.
+
 - **Claude Code:** Ask it to verify in the browser preview at mobile size —
-  valid code, bad code, revoked code, and a returning visit with no typing.
-- **Done when:** all four paths are demonstrated working, not just implemented.
+  valid code, bad code, revoked code, a returning visit with no typing, and a
+  team code resolving to one dancer's own schedule.
+- **Done when:** all five paths are demonstrated working, not just implemented.
 
 ### 8. `[ ]` Build code management in the admin panel
 
@@ -275,14 +284,15 @@ template.
 
 ### 13. `[ ]` Apply model changes from item 3
 
-Two additive columns, per the data-model decision: `teams.show_order` (1–8,
-nullable until the draw) and `people.is_captain` (from the template's `Captain?`
-column). No divisions, no multi-team dancers, no second performance, and **no
-multi-role support** — every person holds exactly one role.
+- **`teams.show_order`** — 1–8, nullable until the draw.
+- **`person_roles` join table** replacing single `people.role_id`.
+  `resolveSession` pushes every role into `targets`; `blocksForTargets` already
+  ORs an arbitrary list, so the query side is nearly free.
+- Captains hold `Dancer` + `Captain`, assigned by the importer from the
+  template's `Captain?` column. `Captain` is an ordinary `roles` row.
 
-Captains hold the Dancer role like everyone else, so captain-only blocks reach
-them by the importer expanding a captain-targeted row into person blocks using
-`is_captain` — not a fourth targeting mode, and not a Captain role.
+No divisions, no multi-team dancers, no second performance, no `is_captain`
+boolean, and no fourth targeting mode.
 
 ### 14. `[ ]` Fix the known correctness gaps
 

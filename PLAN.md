@@ -13,7 +13,7 @@ competition weekend. **Read this at the start of every session.**
 
 ## Where things stand
 
-**Done: Phase A (1–4), Phase B (5–8), and items 9 and 13.** Last updated
+**Done: Phase A (1–4), Phase B (5–8), and items 9, 11 and 13.** Last updated
 2026-08-06.
 
 - The viewer is **behind access codes**, enforced server-side, with the roster
@@ -22,15 +22,17 @@ competition weekend. **Read this at the start of every session.**
   phone on the wrong zone or the wrong clock cannot shift what it shows.
 - The data model carries **multi-role people** (captains hold Dancer + Captain)
   and a **running order** on teams.
-- **93 tests** run under `npm test`, covering authorization negatives, timezone
-  and DST, code management, and the schema migration.
+- Changes are **broadcast only to the people they affect**, over a socket whose
+  origin is now locked down.
+- **123 tests** run under `npm test`, covering authorization negatives, timezone
+  and DST, code management, the schema migration, and broadcast scoping.
 
 The open decisions are all resolved (see below); item 12 was reshaped by them.
 
-**Not yet true of this project:** no deployment, no real data, no service
-worker, and every change still wakes every client.
+**Not yet true of this project:** no deployment, no real data, and no service
+worker.
 
-**Next up, per the build order: items 11, 14, 10.**
+**Next up, per the build order: items 14, 10.**
 
 ### Build order
 
@@ -40,8 +42,8 @@ Everything else proceeds now, in this order:
 
 1. ~~**Item 4** — anonymized fixtures.~~ Done.
 2. ~~**Phase B (5–8)** — access codes.~~ Done.
-3. **Items 9, 13, 11, 14, 10** — timezone ✅, the two schema columns ✅, then
-   scoped broadcasts, correctness gaps, service worker.
+3. **Items 9, 13, 11, 14, 10** — timezone ✅, the two schema columns ✅, scoped
+   broadcasts ✅, then correctness gaps, service worker.
 4. **Phase D (15–18)** — admin tooling.
 5. **Item 12 last**, against a frozen template.
 
@@ -446,7 +448,7 @@ do when something looks stale.
 - **Claude Code:** Have it verify by killing the server and reloading, not by
   reading the code.
 
-### 11. `[ ]` Scope broadcasts to the affected audience
+### 11. `[x]` Scope broadcasts to the affected audience
 
 Every change currently makes all ~280 clients refetch. The audience
 (`personIds` / `teamIds`) is already computed for the edit log — put it in the
@@ -457,6 +459,54 @@ broadcast and let clients ignore changes that don't affect them.
 socket. That is survivable only because broadcasts carry no personal data today.
 Putting `personIds` into the payload without fixing the origin turns a shrug
 into a leak.
+
+**Done 2026-08-06** — `server/lib/live.js`, a scoped `broadcast` threaded
+through every write path, and 30 new tests (123 total).
+
+```bash
+npm test
+```
+
+**The audience never leaves the server**, which is a deliberate departure from
+the sketch above — see `docs/decisions.md`. Sockets join a room per block target
+and a change is emitted only to that block's rooms, so the payload is still
+`{ updatedAt, changedBlockIds, at }` and an unaffected client receives no bytes
+rather than receiving and discarding them. Client-side filtering would have put
+a who-is-affected list on every socket, which is the roster disclosure item 6
+just closed.
+
+- **A room name is a block target**, and a socket joins one room per entry in
+  `resolveSession(...).targets` — the same list the schedule query ORs over. So
+  "who hears about this block" and "whose schedule contains this block" are one
+  computation. This is the part to preserve if anything here is rewritten.
+- **The origin is same-origin plus an allow-list**, enforced in `allowRequest`
+  because that is the one hook that sees `Host` alongside `Origin`. Comparing
+  the two is what makes it correct with no configuration — important when the
+  deploy target is still open, since a mis-set allow-list would mean "nothing
+  updates live" discovered on Saturday. Verified against the running server: a
+  foreign origin gets 403, same-origin and header-less clients get 200.
+- **A session change re-handshakes the socket** (`resyncSession()` on the
+  client). Room membership comes from the handshake cookie, so without it a
+  dancer who has just picked their name keeps hearing only team-wide changes and
+  misses their own airport pickup moving. Demonstrated in the browser.
+- **Roster edits re-derive every open socket's rooms** server-side, because
+  moving a dancer between teams has to move their socket. The failure mode
+  without it is silent, so it is tested both ways: a personal-code holder
+  follows their transfer, and a team-code session whose dancer left the team
+  loses its rooms exactly as item 6 already invalidates its cookie.
+- **Imports and re-syncs are scoped too**, from the targets the diff actually
+  touched — so a no-op re-sync, which happens repeatedly during setup, now
+  wakes nobody.
+
+Demonstrated in the browser at 375×812: an edit to another team left the phone
+untouched (0 refetches), its own team's edit updated the time live, and after
+stepping back through "Not you?" and re-identifying, a newly created
+person-targeted block arrived without a reload.
+
+**Residual:** the `roster:updated` broadcast still goes to everyone. A renamed
+team or a reassigned contact card can change what several unrelated schedules
+render and there is no block to derive an audience from — cheap to leave, since
+roster edits are rare mid-event compared with schedule edits.
 
 ### 12. `[ ]` Build the template importer
 
@@ -592,6 +642,8 @@ authorization, negative cases explicit.
   (`event-time.test.js`).
 - ✅ Schema migration against a populated legacy database
   (`person-roles.test.js`).
+- ✅ Broadcast scoping, the socket origin policy, and the import path's
+  audience (`broadcast.test.js`).
 - ❌ **Import pipeline** — time parsing across the accepted formats, assignment
   resolution, diff classification. Untouched, and the biggest remaining gap.
 - ❌ **No CI script.** `npm test` is run by hand.
@@ -674,7 +726,7 @@ for "I lost my link" at the check-in desk.
 | Risk | Mitigation | Item |
 | --- | --- | --- |
 | ~~Access codes look enforced but aren't~~ | Closed — subject derives from the session only, 21 authorization tests | 6 |
-| Socket CORS reflects any origin, and item 11 adds data to broadcasts | Lock the origin down as part of item 11, not after | 11 |
+| ~~Socket CORS reflects any origin, and item 11 adds data to broadcasts~~ | Closed — origin is same-origin plus an allow-list, and the audience stays server-side so broadcasts gained no data at all | 11 |
 | Reload while offline shows a browser error | Service worker | 10 |
 | ~~Timezone silently shifts every time shown~~ | Closed — instants resolved server-side, device clock drift corrected, 21 tests | 9 |
 | Real spreadsheet doesn't match the template | Logistics authors in our template; importer validates and rejects loudly | 12 |
@@ -682,7 +734,7 @@ for "I lost my link" at the check-in desk.
 | Dancer schedules have no source and never get authored | Named owner for the content work at item 24 | 24 |
 | ~~Late schema change forces rework~~ | Closed — model confirmed against past-year data, and applied in item 13 with a migration that runs on boot | 2, 3, 13 |
 | Real roster still not in hand | A people problem, not an engineering one — it was due at T-6 and is the likeliest thing to slip past the rehearsal | 24 |
-| Thundering herd on every change | Audience-scoped broadcasts + load test | 11, 20 |
+| Thundering herd on every change | Audience-scoped broadcasts ✅ — still to be confirmed under load | 11, 20 |
 | Total app failure during the event | Backups, monitoring, printed fallback | 23, 28 |
 
 ---
@@ -697,7 +749,7 @@ the two that actually catch problems.
 | --- | --- |
 | ~~T-6 weeks~~ | ~~Phase A.~~ Done — but **real rosters are still not in hand**, and that is a people problem, not an engineering one. Chase it now; it is usually the long pole. |
 | ~~T-5~~ | ~~Phase B (access codes).~~ Done. |
-| T-4 | Phase C (reliability core) — items 9 ✅ and 13 ✅ done; 11, 14, 10 remain. |
+| T-4 | Phase C (reliability core) — items 9 ✅, 11 ✅ and 13 ✅ done; 14, 10 remain. |
 | T-3 | Phase D + E (admin tooling, tests, load test). |
 | T-2 | Phase F + item 21 (deploy, ops, devices). |
 | T-1 | Items 24–26. Dress rehearsal. |

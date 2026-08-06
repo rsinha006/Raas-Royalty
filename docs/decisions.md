@@ -466,3 +466,78 @@ rehearsal (item 26) even though it is last in the build order.** Track its
 progress as a dependency with a date, not as a background task. If it is not
 final by T-2 weeks, the rehearsal is at risk regardless of how much else is
 finished.
+
+---
+
+## Broadcast scoping is done with rooms, not with an audience in the payload
+**Date:** 2026-08-06 · **Status:** decided · **Constrains:** 11, 20, and any
+future push-notification work
+
+**Question.** Item 11 as written says the audience (`personIds` / `teamIds`) is
+already computed for the edit log, so put it in the broadcast and let clients
+ignore changes that don't affect them. The same item warns that doing exactly
+that turns the wide-open Socket.IO origin into a leak. Which half wins?
+
+**Decision.** Neither: the audience never leaves the server. Sockets join a room
+per block target — `team:t_alpha`, `person:p_alice`, `role:dancer` — and a
+change is emitted only to the rooms its block targets. The payload is unchanged
+from before item 11: `{ updatedAt, changedBlockIds, at }`, which says that
+something changed and nothing about who it changed for.
+
+**Why.** Client-side filtering means every connected socket receives every
+audience list. That is a roster-shaped disclosure — who is on which team, who
+has a personal block — delivered to anything holding a socket, and it would have
+been the second time this project shipped an endpoint that hands out the roster
+(the first was `/api/bootstrap`, closed in item 6). Rooms deliver the same
+saving without the disclosure, and they save more: an unaffected client receives
+no bytes at all rather than receiving and discarding them, which is what the
+item was actually for.
+
+**The property that makes it maintainable:** a room name *is* a block target,
+and a socket joins one room per entry in `resolveSession(...).targets` — the
+same list `blocksForTargets` ORs over to build that person's schedule. "Who
+hears about this block" and "whose schedule contains this block" are therefore
+one computation, not two that can drift. A fourth targeting mode would need no
+change in `server/lib/live.js` at all.
+
+**What this costs.** Room membership is derived from the handshake cookie, so a
+session change has to re-handshake — `resyncSession()` on the client, called on
+sign-in, identify, and sign-out. And a roster edit can move someone between
+teams, so roster broadcasts re-derive every open socket's rooms server-side.
+Both are covered by tests; the second is the one that would fail silently.
+
+**What would change it.** Per-block content in the payload (item 14's "your 2pm
+moved" or a future push layer) does not change this decision — it strengthens
+it. The rooms are already the audience, so the content goes to the same place;
+it must never be broadcast alongside an audience list instead.
+
+---
+
+## The socket origin is same-origin plus an explicit allow-list
+**Date:** 2026-08-06 · **Status:** decided · **Constrains:** 11, 22
+
+**Question.** Socket.IO was configured `{ origin: true, credentials: true }`,
+which reflects whatever origin asks — any page on the internet could open an
+authenticated socket. What replaces it, given the deploy target isn't fixed yet
+(item 22) and a wrong value means no live updates at the event?
+
+**Decision.** The request's own `Host` is always allowed, plus `PUBLIC_BASE_URL`
+and anything in `SOCKET_ORIGINS`, plus localhost/LAN origins when
+`NODE_ENV !== 'production'`. Enforced in `allowRequest`, which is the one hook
+that sees the request. A request with no `Origin` header is allowed.
+
+**Why same-origin as the default.** It needs no configuration and cannot be got
+wrong at deploy, which matters because the failure mode of a mis-set allow-list
+is "nothing updates live during the event" and nobody would find it until
+Saturday. A browser sends the page's `Origin` and the target's `Host`
+separately: the real app, served from the host it connects to, always matches;
+`evil.example` opening a socket against us never does.
+
+**Why a missing `Origin` is allowed.** Browsers always send one cross-site, so
+its absence means a non-browser client — which carries no cookie, joins no
+rooms, and learns nothing. Refusing it would break same-origin polling, where
+browsers omit the header, for no security gain.
+
+**At deploy (item 22):** set `PUBLIC_BASE_URL`. It is already needed for the
+access-link export, and it makes the socket policy explicit rather than
+inferred from a proxy's host header.

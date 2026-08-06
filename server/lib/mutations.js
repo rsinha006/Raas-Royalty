@@ -177,7 +177,7 @@ export function updateBlock(id, input, ctx) {
   }
   if ((merged.notes || null) !== (before.notes || null)) changes.push('notes updated');
 
-  if (!changes.length) return { id, changed: false };
+  if (!changes.length) return { id, changed: false, targets: [] };
 
   db.prepare(
     `UPDATE schedule_blocks
@@ -214,12 +214,23 @@ export function updateBlock(id, input, ctx) {
       teamIds: [...new Set([...audience.teamIds, ...priorAudience.teamIds])],
     },
   });
-  return { id, changed: true };
+  // Both targets, for the same reason the audience above merges two: reassigning
+  // a block means one side gained it and the other side lost it, and telling
+  // only the new owner leaves a stale block on the old owner's phone.
+  return {
+    id,
+    changed: true,
+    targets: [
+      { type: before.appliesTo.type, id: before.appliesTo.id },
+      { type: merged.appliesToType, id: merged.appliesToId },
+    ],
+  };
 }
 
+/** Returns the target that lost the block, so the broadcast can reach it. */
 export function deleteBlock(id, ctx) {
   const before = getBlock(id);
-  if (!before) return false;
+  if (!before) return null;
   db.prepare('DELETE FROM schedule_blocks WHERE id = ?').run(id);
   logEdit({
     blockId: id,
@@ -235,7 +246,7 @@ export function deleteBlock(id, ctx) {
       appliesToId: before.appliesTo.id,
     }),
   });
-  return true;
+  return { id, target: { type: before.appliesTo.type, id: before.appliesTo.id } };
 }
 
 /**

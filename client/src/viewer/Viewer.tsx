@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api, ApiError } from '../api';
+import { resyncSession } from '../live';
 import {
   clearCachedSchedules,
   forgetEverything,
@@ -64,9 +65,22 @@ export default function Viewer() {
       });
   }, [phase]);
 
+  /**
+   * Which subject the socket last handshook as. The server derives what this
+   * client hears from the session cookie at connect time, so signing in or
+   * picking a name has to re-establish the connection — otherwise a dancer who
+   * has just identified themselves goes on hearing only team-wide changes.
+   */
+  const socketIdentity = useRef<string | null>(null);
+
   const applySession = useCallback((next: ViewerSession) => {
     setSession(next);
     markSeen();
+    const identity = `${next.subjectType}:${next.subject?.id ?? ''}:${next.identified}`;
+    if (socketIdentity.current !== identity) {
+      socketIdentity.current = identity;
+      resyncSession();
+    }
     setPhase(next.needsIdentity ? 'identify' : 'ready');
   }, []);
 
@@ -126,6 +140,9 @@ export default function Viewer() {
     setSession(null);
     setReason(null);
     setPhase('signed-out');
+    // Drop the socket's rooms too — the cookie it handshook with is gone.
+    socketIdentity.current = null;
+    resyncSession();
   }, []);
 
   /** Team codes only: back to the name list without losing the session. */
@@ -176,6 +193,8 @@ export default function Viewer() {
         clearCachedSchedules();
         setPhase('signed-out');
         setReason('expired');
+        socketIdentity.current = null;
+        resyncSession();
       }}
     />
   );

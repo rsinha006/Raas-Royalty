@@ -88,10 +88,18 @@ export function computeScheduleDiff(rows, { removeMissing = true } = {}) {
   };
 }
 
+/**
+ * Returns `{ updatedAt, targets }`. The targets are every block target the
+ * import touched — an import that only moved one team's call time should wake
+ * that team, not the whole event, and a re-sync that changed nothing at all
+ * wakes nobody. See `server/lib/live.js` for how they become rooms.
+ */
 export function applyScheduleDiff(diff, ctx) {
   const source = ctx.source || 'import';
+  const targets = [];
   const run = db.transaction(() => {
     for (const { row } of diff.create) {
+      targets.push({ type: row.appliesToType, id: row.appliesToId });
       createBlock(
         {
           day: row.day,
@@ -108,7 +116,7 @@ export function applyScheduleDiff(diff, ctx) {
       );
     }
     for (const item of diff.update) {
-      updateBlock(
+      const result = updateBlock(
         item.id,
         {
           day: item.row.day,
@@ -122,6 +130,9 @@ export function applyScheduleDiff(diff, ctx) {
         },
         { ...ctx, source }
       );
+      // Both sides of a reassignment, so a block that moved between teams
+      // disappears from the old one's phones as well as landing on the new.
+      targets.push(...(result?.targets ?? []));
       db.prepare('UPDATE schedule_blocks SET source = ?, source_key = ? WHERE id = ?').run(
         source,
         item.row.sourceKey,
@@ -129,7 +140,8 @@ export function applyScheduleDiff(diff, ctx) {
       );
     }
     for (const item of diff.delete) {
-      deleteBlock(item.id, { ...ctx, source });
+      const removed = deleteBlock(item.id, { ...ctx, source });
+      if (removed) targets.push(removed.target);
     }
 
     logEdit({
@@ -140,7 +152,8 @@ export function applyScheduleDiff(diff, ctx) {
     });
     return touchScheduleVersion();
   });
-  return run();
+  const updatedAt = run();
+  return { updatedAt, targets };
 }
 
 /* ---------------------------- Roster ---------------------------- */

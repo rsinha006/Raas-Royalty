@@ -3,12 +3,13 @@ import http from 'node:http';
 import 'dotenv/config';
 import { Server as SocketServer } from 'socket.io';
 
-import { dbPath, scheduleUpdatedAt } from './db.js';
+import { dbPath } from './db.js';
 import { createApp } from './app.js';
 import { clearChangeFlags } from './lib/mutations.js';
 import { startPolling, syncStatus } from './sync/index.js';
 import { usingDefaultPassword } from './lib/auth.js';
 import { eventTimeState } from './lib/event-time.js';
+import { createLiveHub, originPolicy, roomsForTargets } from './lib/live.js';
 
 const PORT = Number(process.env.PORT || 4000);
 
@@ -20,23 +21,34 @@ const PORT = Number(process.env.PORT || 4000);
 const eventTime = eventTimeState();
 
 /**
- * One broadcast channel for everyone. Payloads carry only the fact that
- * something changed — never schedule content — so an unauthenticated socket
- * learns that *a* change happened and nothing about it. Clients refetch their
- * own personalized slice through /api/schedule, which requires a session.
+ * Broadcasts are scoped to the rooms a change actually affects, and payloads
+ * still carry only the fact that something changed — never schedule content,
+ * and never the list of who it affects. Clients refetch their own personalized
+ * slice through /api/schedule, which requires a session. See lib/live.js.
+ *
+ * `hub` is assigned below; the indirection exists because the Express app is
+ * built before the socket server it broadcasts through.
  */
-let io;
-function broadcast(event, payload) {
-  io?.emit(event, { ...payload, at: new Date().toISOString() });
+let hub = null;
+function broadcast(event, payload, opts) {
+  hub?.broadcast(event, payload, opts);
 }
 
 const app = createApp({ broadcast });
 const server = http.createServer(app);
 
-io = new SocketServer(server, { cors: { origin: true, credentials: true } });
-io.on('connection', (socket) => {
-  socket.emit('hello', { updatedAt: scheduleUpdatedAt() });
+/**
+ * The origin check runs in `allowRequest` rather than only in `cors`, because
+ * that is the one hook that sees the request itself — and comparing Origin
+ * against the request's own Host is what makes same-origin work everywhere
+ * without configuration. A rejected handshake gets a 403.
+ */
+const origins = originPolicy();
+const io = new SocketServer(server, {
+  cors: { origin: (origin, cb) => cb(null, origins.isAllowed(origin)), credentials: true },
+  allowRequest: (req, cb) => cb(null, origins.isAllowed(req.headers.origin, req.headers.host)),
 });
+hub = createLiveHub(io);
 
 /* --------------------------- background --------------------------- */
 
@@ -44,7 +56,11 @@ io.on('connection', (socket) => {
 setInterval(() => clearChangeFlags(30), 5 * 60_000).unref?.();
 
 startPolling((result) => {
-  broadcast('schedule:updated', { updatedAt: result.updatedAt, reason: 'sheet-sync' });
+  broadcast(
+    'schedule:updated',
+    { updatedAt: result.updatedAt, reason: 'sheet-sync' },
+    { rooms: roomsForTargets(result.targets) }
+  );
   console.log(
     `[sync] applied: +${result.diff.create.length} ~${result.diff.update.length} -${result.diff.delete.length}`
   );
@@ -59,6 +75,7 @@ server.listen(PORT, () => {
       `(${eventTime.timezone}, UTC${eventTime.utcOffset})`
   );
   console.log(`  Schedule source: ${status.activeLabel}${status.canPull ? ' (re-sync available)' : ''}`);
+  console.log(`  Socket origins: ${origins.describe()}`);
   if (usingDefaultPassword()) {
     console.log('  Admin password: royalty-admin  ← set ADMIN_PASSWORD before the event\n');
   } else {

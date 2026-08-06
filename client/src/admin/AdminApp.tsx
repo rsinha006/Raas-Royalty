@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
-import { useLive } from '../live';
+import { useLive, resyncSession } from '../live';
 import Overview from './Overview';
 import RosterPanel from './RosterPanel';
 import SchedulePanel from './SchedulePanel';
@@ -54,10 +54,23 @@ export default function AdminApp() {
     );
   }
 
-  if (!session.admin) return <Login onSuccess={loadSession} />;
+  // The socket is handed its rooms from the cookie it connected with, so both
+  // sides of an admin session change need a fresh handshake: signing in to
+  // start hearing every team's edits, signing out to stop.
+  if (!session.admin) {
+    return (
+      <Login
+        onSuccess={() => {
+          resyncSession();
+          loadSession();
+        }}
+      />
+    );
+  }
 
   const logout = async () => {
     await api.post('/api/admin/logout');
+    resyncSession();
     loadSession();
   };
 

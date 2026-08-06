@@ -21,7 +21,7 @@ otherwise the reasoning is lost between sessions and gets re-litigated.
 npm install && npm run seed && npm run build && npm start   # http://localhost:4000
 npm run dev          # hot reload: client :5173, API :4000
 npm run seed:reset   # rebuild placeholder data from scratch
-npm test             # 93 tests
+npm test             # 123 tests
 npm run codes -- --list   # every live access code and its subject
 ```
 
@@ -38,12 +38,13 @@ React/Vite bundle from `client/dist`. No external services.
 - `server/lib/queries.js` — reads, including the personalization logic
 - `server/lib/mutations.js` — writes, all of which log to `edit_log`
 - `server/lib/viewer-auth.js` — code → session, re-checked on every request
+- `server/lib/live.js` — socket rooms, scoped broadcasts, the origin policy
 - `server/lib/event-time.js` — the venue timezone; wall-clock → instant
 - `server/sync/` — the import pipeline
 - `client/src/viewer/` — the participant app
 - `client/src/admin/` — the logistics panel
 
-Four things worth knowing before changing anything:
+Five things worth knowing before changing anything:
 
 **Roles are data, not an enum, and a person holds a set of them.** Roles live in
 `person_roles`; captains hold `Dancer` + `Captain`. A role row's `selector`
@@ -64,17 +65,24 @@ absolute `startsAt`/`endsAt` resolved against the venue's zone; the client only
 compares instants and never parses a wall-clock string. Don't reintroduce
 date-string parsing on the client.
 
+**A socket room is a block target.** `team:t_alpha`, `person:p_alice`,
+`role:dancer` — and a socket joins one room per entry in
+`resolveSession(...).targets`, the same list the schedule query ORs over. That
+symmetry is what keeps "who hears about this block" and "whose schedule contains
+this block" from drifting apart, so keep it. Broadcast payloads carry no
+audience: who is affected is a room, never a field on the wire.
+
 Data model and spreadsheet templates are documented in [README.md](README.md).
 
 ## Current state
 
-Phase A (1–4), Phase B (5–8), and items 9 and 13 are done — see
+Phase A (1–4), Phase B (5–8), and items 9, 11 and 13 are done — see
 [PLAN.md](PLAN.md) for what each one settled. In short: the viewer is behind
 access codes enforced server-side, event times are resolved against the venue's
-timezone by the server, and 93 tests run under `npm test`.
+timezone by the server, changes reach only the people they affect, and 123 tests
+run under `npm test`.
 
-Still not true: no deployment, no real data, no service worker, and every
-change still wakes every client.
+Still not true: no deployment, no real data, and no service worker.
 
 The design decisions that were blocking are settled in
 [docs/decisions.md](docs/decisions.md) — read it before changing the data model,

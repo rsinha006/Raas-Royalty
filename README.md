@@ -133,6 +133,21 @@ something changed — each client refetches its own slice, so no one ever receiv
 another person's schedule. Clients diff old against new and briefly highlight
 what moved for them specifically.
 
+**A change only reaches the people it affects.** Sockets join a room per block
+target (`team:…`, `person:…`, `role:…`), matching the targets that build that
+person's schedule, and a change is emitted to that block's rooms alone — so
+moving one team's warm-up wakes that team, not all 280 phones. The payload says
+nothing about who is affected; the audience is the room, never a field.
+
+Room membership comes from the session cookie sent with the handshake, so the
+client re-handshakes whenever the session changes (sign-in, identity step,
+sign-out), and a roster edit re-derives every open socket's rooms server-side.
+
+Only same-origin connections are accepted, plus `PUBLIC_BASE_URL` and anything
+in `SOCKET_ORIGINS`; localhost and LAN origins are also allowed outside
+production, which is what lets the Vite dev server and a phone on the same wifi
+connect. The boot banner prints the resolved policy.
+
 ## Offline
 
 The last successful schedule is cached in `localStorage`. If a fetch fails, the

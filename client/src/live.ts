@@ -4,6 +4,11 @@ import { useEffect, useRef, useState } from 'react';
 /**
  * One shared socket for the whole app. The server only ever announces *that*
  * something changed — each client refetches its own personalized slice.
+ *
+ * The server decides what reaches this socket, from the session cookie sent
+ * with the handshake: a change to another team's schedule is never delivered
+ * here at all, rather than delivered and filtered out. So there is no audience
+ * information on the wire, and nothing to filter on this side.
  */
 let socket: Socket | null = null;
 
@@ -11,11 +16,28 @@ export function getSocket(): Socket {
   if (!socket) {
     socket = io({
       transports: ['websocket', 'polling'],
+      withCredentials: true,
       reconnectionDelay: 500,
       reconnectionDelayMax: 5000,
     });
   }
   return socket;
+}
+
+/**
+ * Re-handshake after signing in, identifying, or signing out.
+ *
+ * The server reads the session once, from the handshake, and a live socket
+ * cannot be told about a new cookie — so the connection has to be made again.
+ * Without this, someone who has just picked their name on the identity step
+ * keeps hearing only their team's changes and misses their own airport pickup
+ * moving. A no-op before anything has connected, which is what makes it safe
+ * to call on the first session check of a page load.
+ */
+export function resyncSession(): void {
+  if (!socket) return;
+  socket.disconnect();
+  socket.connect();
 }
 
 export type LiveStatus = 'connecting' | 'live' | 'offline';

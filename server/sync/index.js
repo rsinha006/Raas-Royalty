@@ -52,10 +52,17 @@ export async function ingest(buffer, filename, opts = {}) {
     return { ...result, ok: false, error: 'Every row failed validation — nothing was applied.' };
   }
 
-  const updatedAt = applyScheduleDiff(diff, { editedBy, source, label: label || filename });
+  const { updatedAt, targets } = applyScheduleDiff(diff, {
+    editedBy,
+    source,
+    label: label || filename,
+  });
   setMeta('last_sync_at', updatedAt);
   setMeta('last_sync_source', source);
-  return { ...result, dryRun: false, updatedAt };
+  // `targets` is what the change gets broadcast to. It rides along on the
+  // result rather than being re-derived, because the diff is the only place
+  // that knows which blocks were actually touched.
+  return { ...result, dryRun: false, updatedAt, targets };
 }
 
 /** Force Re-sync / poll tick. Always applies; never a dry run. */

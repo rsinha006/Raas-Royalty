@@ -38,6 +38,7 @@ import { uploadSource } from '../sync/sources.js';
 import { adminCodesRouter } from './admin-codes.js';
 import { listCodes, missingSubjects } from '../lib/access-codes.js';
 import { eventTimeState } from '../lib/event-time.js';
+import { roomsForTargets } from '../lib/live.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -158,10 +159,19 @@ export function adminRouter({ broadcast }) {
    * Roster writes
    * ---------------------------------------------------------------- */
 
+  /**
+   * Roster changes go to everyone, and deliberately so: a renamed team, a
+   * reassigned contact card or a new role changes what several unrelated
+   * schedules render, and there is no block to derive an audience from.
+   *
+   * `refreshRooms` is the other half — moving a dancer between teams changes
+   * which rooms their already-open socket belongs in, and without this they
+   * would keep hearing their old team's changes until they reloaded.
+   */
   const rosterChanged = (req, summary) => {
     logEdit({ editedBy: editorName(req), source: 'admin', changeType: 'roster', summary });
     const ts = touchScheduleVersion();
-    broadcast('roster:updated', { updatedAt: ts });
+    broadcast('roster:updated', { updatedAt: ts }, { refreshRooms: true });
     return ts;
   };
 
@@ -423,9 +433,18 @@ export function adminRouter({ broadcast }) {
    * Schedule blocks — manual editing
    * ---------------------------------------------------------------- */
 
-  const scheduleChanged = (extra = {}) => {
+  /**
+   * @param targets the block targets this change touched. Omitted means "could
+   *   be anyone" and wakes every client — the pre-item-11 behaviour, now the
+   *   exception rather than the rule.
+   */
+  const scheduleChanged = (extra = {}, targets = null) => {
     const ts = touchScheduleVersion();
-    broadcast('schedule:updated', { updatedAt: ts, ...extra });
+    broadcast(
+      'schedule:updated',
+      { updatedAt: ts, ...extra },
+      targets ? { rooms: roomsForTargets(targets) } : {}
+    );
     return ts;
   };
 
@@ -445,7 +464,9 @@ export function adminRouter({ broadcast }) {
       { ...b, locationId },
       { editedBy: editorName(req), source: 'manual' }
     );
-    const updatedAt = scheduleChanged({ changedBlockIds: [id] });
+    const updatedAt = scheduleChanged({ changedBlockIds: [id] }, [
+      { type: b.appliesToType, id: b.appliesToId },
+    ]);
     res.json({ ok: true, id, updatedAt });
   });
 
@@ -460,14 +481,16 @@ export function adminRouter({ broadcast }) {
       source: 'manual',
     });
     if (!result) return res.status(404).json({ error: 'Not found' });
-    const updatedAt = result.changed ? scheduleChanged({ changedBlockIds: [req.params.id] }) : undefined;
+    const updatedAt = result.changed
+      ? scheduleChanged({ changedBlockIds: [req.params.id] }, result.targets)
+      : undefined;
     res.json({ ok: true, changed: result.changed, updatedAt });
   });
 
   router.delete('/blocks/:id', (req, res) => {
-    const ok = deleteBlock(req.params.id, { editedBy: editorName(req), source: 'manual' });
-    if (!ok) return res.status(404).json({ error: 'Not found' });
-    const updatedAt = scheduleChanged({ removedBlockIds: [req.params.id] });
+    const removed = deleteBlock(req.params.id, { editedBy: editorName(req), source: 'manual' });
+    if (!removed) return res.status(404).json({ error: 'Not found' });
+    const updatedAt = scheduleChanged({ removedBlockIds: [req.params.id] }, [removed.target]);
     res.json({ ok: true, updatedAt });
   });
 
@@ -508,7 +531,11 @@ export function adminRouter({ broadcast }) {
       });
       if (!result.ok) return res.status(400).json(result);
       uploadSource.remember(rec.buffer, rec.filename);
-      broadcast('schedule:updated', { updatedAt: result.updatedAt, reason: 'import' });
+      broadcast(
+        'schedule:updated',
+        { updatedAt: result.updatedAt, reason: 'import' },
+        { rooms: roomsForTargets(result.targets) }
+      );
       res.json(result);
     } catch (err) {
       res.status(400).json({ error: err.message });
@@ -519,7 +546,11 @@ export function adminRouter({ broadcast }) {
   router.post('/schedule/resync', async (req, res) => {
     try {
       const result = await pullAndSync({ editedBy: editorName(req) });
-      broadcast('schedule:updated', { updatedAt: result.updatedAt, reason: 'resync' });
+      broadcast(
+        'schedule:updated',
+        { updatedAt: result.updatedAt, reason: 'resync' },
+        { rooms: roomsForTargets(result.targets) }
+      );
       res.json(result);
     } catch (err) {
       res.status(400).json({ error: err.message });

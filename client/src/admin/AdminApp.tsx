@@ -6,13 +6,15 @@ import RosterPanel from './RosterPanel';
 import SchedulePanel from './SchedulePanel';
 import ImportPanel from './ImportPanel';
 import LogPanel from './LogPanel';
+import CodesPanel from './CodesPanel';
 
-type Tab = 'overview' | 'schedule' | 'roster' | 'import' | 'log';
+type Tab = 'overview' | 'schedule' | 'roster' | 'codes' | 'import' | 'log';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'schedule', label: 'Schedule' },
   { id: 'roster', label: 'Roster' },
+  { id: 'codes', label: 'Access codes' },
   { id: 'import', label: 'Import & Sync' },
   { id: 'log', label: 'Change log' },
 ];
@@ -104,6 +106,7 @@ export default function AdminApp() {
         {tab === 'overview' && <Overview key={refreshKey} onGoto={setTab} />}
         {tab === 'schedule' && <SchedulePanel key={refreshKey} onChanged={refresh} />}
         {tab === 'roster' && <RosterPanel key={refreshKey} onChanged={refresh} />}
+        {tab === 'codes' && <CodesPanel key={refreshKey} />}
         {tab === 'import' && <ImportPanel onChanged={refresh} />}
         {tab === 'log' && <LogPanel key={refreshKey} />}
       </div>

@@ -382,6 +382,42 @@ item 12 if the template churns late — bounded, because it is confined to the
 readers, and because we control the file rather than reverse-engineering someone
 else's.
 
+---
+
+## The access-link export carries no contact details
+**Date:** 2026-08-06 · **Status:** decided
+
+**Question.** Item 8's done-when is "the exact file you'll mail-merge from". A
+mail merge needs an address. Should the CSV join in each subject's contact card
+so the file is self-sufficient?
+
+**Decision.** No. The export is subject type, subject, team, role, code, link,
+last used — and nothing else. Recipient addresses come from whatever list
+logistics actually mails from, joined on the subject name.
+
+**Why.** `people.contact_id` is not a person's own contact card. It is the card
+they should *call* — their coordinator — and it is shared across a whole role:
+in the seed, all twelve exec board members point at the Event Director's card,
+and every dancer on a team points at that team's liaison. A "Send To" column
+built from it would have produced a file that mails a dozen people's private
+access links to one inbox, and the failure is silent because the column looks
+plausible on inspection. This was caught by reading the seeded data, not the
+schema, which is the general lesson.
+
+Nothing in the data model holds a participant's own email or phone — not the
+roster template either, whose contact column is the same coordinator field. So
+the honest export is one that does not pretend to know, and the panel says so
+where an admin will read it before running the merge.
+
+**What this costs.** One join step in whatever runs the merge. Cheap, and
+visible: an unmatched name shows up as a row nobody sent, which is exactly the
+failure you want rather than a link delivered to the wrong person.
+
+**What would change it.** Adding real per-person contact details — an owner
+column on the roster, or a `people.email` — is the prerequisite for a
+self-sufficient export. If item 24 introduces one, revisit this and add the
+column then, not before.
+
 The cost is that the app cannot be demonstrated end-to-end with real data until
 the template lands, so **the template is on the critical path for the dress
 rehearsal (item 26) even though it is last in the build order.** Track its

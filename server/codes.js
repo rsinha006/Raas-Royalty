@@ -1,6 +1,7 @@
 /**
- * Access-code CLI. The admin panel gets this properly in item 8; until then
- * this is how codes are inspected, backfilled and rotated.
+ * Access-code CLI. The admin panel (Access codes tab) does all of this with a
+ * CSV export on top; this stays for the cases where there is no browser — a
+ * deploy check, a cron, or an admin password nobody can find at 2am.
  *
  *   npm run codes              backfill, then summarize
  *   npm run codes -- --list    every live code with its subject

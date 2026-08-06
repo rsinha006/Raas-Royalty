@@ -2,9 +2,8 @@
  * Access codes — generation, lookup, revocation, and roster backfill.
  *
  * This module owns codes as *data*. It does not enforce anything: nothing here
- * decides whether a request is allowed. That is item 6, and until it lands
- * these codes are decorative — `/api/schedule` is still open and
- * `/api/bootstrap` still returns the whole roster.
+ * decides whether a request is allowed. That is `viewer-auth.js`, which turns a
+ * code into a session and re-checks it on every request.
  *
  * Who gets a code, per docs/decisions.md:
  *
@@ -105,7 +104,7 @@ export function codeForSubject(subjectType, subjectId) {
   return row ? shape(row) : null;
 }
 
-/** Records that a code was actually used. Cheap, and it drives "never used" in item 8. */
+/** Records that a code was actually used. Cheap, and it drives "never used" in the panel. */
 export function touchCodeUsed(code) {
   db.prepare('UPDATE access_codes SET last_used_at = ? WHERE code = ?').run(nowIso(), code);
 }
@@ -124,8 +123,15 @@ function shape(row) {
 
 /**
  * Every code with the subject's current display name resolved. `subjectLabel`
- * is null when the subject has been deleted — an orphan, which item 8 should
- * show and offer to clean up.
+ * is null when the subject has been deleted — an orphan, which the admin panel
+ * surfaces and offers to revoke.
+ *
+ * Deliberately no contact details. `people.contact_id` is the card a person
+ * should *call* — their coordinator — not their own address: all twelve exec
+ * board members point at the Event Director's card. Joining it in and calling
+ * it "send to" would produce a mail-merge file that posts a dozen people's
+ * private access links to one inbox. Nothing in this data model holds a
+ * participant's own email, so the export does not pretend otherwise.
  */
 export function listCodes({ includeRevoked = false } = {}) {
   const rows = db
@@ -157,6 +163,13 @@ export function listCodes({ includeRevoked = false } = {}) {
   }));
 }
 
+/** Does this code still point at a row that exists? */
+export function subjectExists(subjectType, subjectId) {
+  const table = { team: 'teams', person: 'people', role: 'roles' }[subjectType];
+  if (!table) return false;
+  return !!db.prepare(`SELECT 1 FROM ${table} WHERE id = ?`).get(subjectId);
+}
+
 /* ------------------------------------------------------------------ *
  * Issue and revoke
  * ------------------------------------------------------------------ */
@@ -181,7 +194,7 @@ export function revokeCode(code, ctx = {}) {
  *
  * Idempotent by default: a subject that already has a live code keeps it, so
  * re-running the backfill never invalidates links that have gone out already.
- * Pass `regenerate: true` for the one-click rotate in item 8.
+ * Pass `regenerate: true` for the panel's one-click rotate.
  */
 export function issueCode({ subjectType, subjectId, note = null, regenerate = false }, ctx = {}) {
   assertSubject(subjectType, subjectId);
@@ -277,4 +290,37 @@ export function backfillAccessCodes(opts = {}, ctx = {}) {
 /** Live codes pointing at a subject that no longer exists. */
 export function orphanedCodes() {
   return listCodes().filter((c) => c.orphaned);
+}
+
+/** Subjects that should hold a code and don't — what "issue missing" acts on. */
+export function missingSubjects(opts = {}) {
+  return subjectsNeedingCodes(opts).filter((s) => !codeForSubject(s.subjectType, s.subjectId));
+}
+
+/**
+ * Rotate every live code at once, optionally narrowed to one subject type.
+ *
+ * This invalidates every link already distributed, so it is the "a printed list
+ * walked off" button rather than routine maintenance — the caller is expected
+ * to have made the admin confirm. Orphans are skipped: reissuing a code for a
+ * deleted subject would mint a credential for something with no schedule.
+ *
+ * One transaction, so a failure part-way cannot leave half the roster holding
+ * dead links with no new ones generated.
+ */
+export function regenerateAll({ subjectType = null } = {}, ctx = {}) {
+  const targets = listCodes()
+    .filter((c) => !c.orphaned)
+    .filter((c) => !subjectType || c.subjectType === subjectType);
+
+  const run = db.transaction(() => {
+    for (const c of targets) {
+      issueCode(
+        { subjectType: c.subjectType, subjectId: c.subjectId, regenerate: true },
+        ctx
+      );
+    }
+    return { regenerated: targets.length };
+  });
+  return run();
 }

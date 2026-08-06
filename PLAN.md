@@ -339,12 +339,49 @@ reason a code is revoked mid-event is that the phone holding it went missing.
 Being offline does not trigger that path, so the offline cache survives bad
 wifi.
 
-### 8. `[ ]` Build code management in the admin panel
+### 8. `[x]` Build code management in the admin panel
 
 View, regenerate, and revoke per subject; bulk regenerate; CSV export of
 subject → link for distribution.
 
 - **Done when:** you can produce the exact file you'll mail-merge from.
+
+**Done 2026-08-06** — an Access codes tab (`client/src/admin/CodesPanel.tsx`),
+`server/routes/admin-codes.js`, and 23 new tests (52 total). Verified in the
+browser against the seed data: regenerating a team code killed the old magic
+link and the new one landed on the identity step; revoking a staff code locked
+it out; the export downloaded 45 rows.
+
+```bash
+npm test
+```
+
+- **The export carries no email column**, and that is deliberate — see
+  `docs/decisions.md`. Nobody's own address is stored anywhere in this app, so
+  the merge joins on the subject name against whatever list logistics mails
+  from. This is the one thing to re-read before "improving" the CSV.
+- **Links come from `PUBLIC_BASE_URL`** when it is set, falling back to the
+  request's host. Set it at deploy (item 22) — behind a proxy the host header is
+  whatever the proxy passed along, and 280 links to the wrong hostname is a
+  mistake the recipients discover, not us.
+- **Bulk rotate is gated on typing `REGENERATE`**, server-side as well as in the
+  UI. Its blast radius is everyone at the event locked out simultaneously, which
+  is worse than anything else in the panel; a confirm dialog is not enough of a
+  speed bump.
+- **Orphans are shown but cannot be regenerated** — only revoked. Reissuing for
+  a deleted subject would mint a live credential for something with no schedule.
+- The panel makes coverage the headline (live / never used / missing), because
+  the question an admin arrives with is "who still hasn't got a link", and a
+  subject with no code cannot reach their schedule at all.
+
+The CLI (`npm run codes`) stays for the no-browser cases and shares the same
+library, so the two cannot drift.
+
+**Residual, not fixed here:** opening a dead magic link while already signed in
+silently keeps the existing session instead of explaining that the link is
+revoked. Harmless — no cross-subject access, item 6's checks still hold — but
+confusing at a check-in desk. It is item 7 behaviour, not new; fold it into
+item 14's correctness pass.
 
 ---
 
@@ -411,6 +448,8 @@ boolean, and no fourth targeting mode.
 ### 14. `[ ]` Fix the known correctness gaps
 
 - Concurrent admin edits are silently last-write-wins.
+- A dead magic link opened while already signed in silently keeps the old
+  session instead of saying the link is revoked (found during item 8).
 - Deleting a person or team orphans their schedule blocks.
 - "Last updated" is global, so everyone sees a fresh timestamp when any team
   changes — mildly alarming and slightly dishonest.

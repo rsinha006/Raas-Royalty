@@ -5,6 +5,7 @@ import type { TemplateColumn } from '../types';
 
 interface OverviewData {
   counts: Record<string, number>;
+  codes: { live: number; neverUsed: number; missing: number };
   updatedAt: string | null;
   sync: {
     activeId: string;
@@ -23,7 +24,11 @@ interface OverviewData {
   };
 }
 
-export default function Overview({ onGoto }: { onGoto: (tab: 'import' | 'schedule') => void }) {
+export default function Overview({
+  onGoto,
+}: {
+  onGoto: (tab: 'import' | 'schedule' | 'codes') => void;
+}) {
   const [data, setData] = useState<OverviewData | null>(null);
 
   useEffect(() => {
@@ -31,8 +36,6 @@ export default function Overview({ onGoto }: { onGoto: (tab: 'import' | 'schedul
   }, []);
 
   if (!data) return <div className="loading-screen"><span className="spinner" /></div>;
-
-  const shareUrl = `${window.location.origin}/`;
 
   return (
     <>
@@ -64,17 +67,37 @@ export default function Overview({ onGoto }: { onGoto: (tab: 'import' | 'schedul
       </div>
 
       <div className="card">
-        <h3>The shared link</h3>
-        <p className="small muted">Everyone uses the same URL and picks who they are.</p>
-        <div className="row" style={{ marginTop: 10 }}>
-          <code style={{ flex: 1, wordBreak: 'break-all' }}>{shareUrl}</code>
-          <button
-            className="btn sm"
-            onClick={() => navigator.clipboard?.writeText(shareUrl)}
-          >
-            Copy
+        <h3>Access</h3>
+        <p className="small muted">
+          There is no shared link — everyone opens their own. One code per team, one per staff
+          member.
+        </p>
+        <div className="list-row">
+          <div>
+            <div className="label">
+              {data.codes.live} live code{data.codes.live === 1 ? '' : 's'}
+            </div>
+            <div className="sub">
+              {data.codes.missing > 0
+                ? `${data.codes.missing} subject(s) still have none`
+                : 'Everyone who needs one has one'}
+              {' · '}
+              {data.codes.neverUsed} never opened
+            </div>
+          </div>
+          <button className="btn sm" onClick={() => onGoto('codes')}>
+            Manage
           </button>
         </div>
+        {data.codes.missing > 0 && (
+          <div className="banner info" style={{ marginTop: 10 }}>
+            <span aria-hidden="true">⚠️</span>
+            <span>
+              Someone without a code cannot reach their schedule at all. Issue the missing ones
+              before distribution.
+            </span>
+          </div>
+        )}
       </div>
 
       <div className="card">

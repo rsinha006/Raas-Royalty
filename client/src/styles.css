@@ -855,6 +855,19 @@ a {
   font-size: 12px;
 }
 
+/* An access code in the admin list: read aloud at a check-in desk, so it wants
+   the same monospaced, spaced-out treatment as the box people type it into. */
+.code-chip {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 14px;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+  color: var(--gold);
+  background: var(--bg-raised-2);
+  border-radius: 8px;
+  padding: 6px 9px;
+}
+
 .log-entry {
   padding: 10px 0;
   border-bottom: 1px solid var(--line-soft);

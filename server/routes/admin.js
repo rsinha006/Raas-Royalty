@@ -35,6 +35,8 @@ import {
 } from '../sync/normalize.js';
 import { applyRosterDiff, computeRosterDiff } from '../sync/diff.js';
 import { uploadSource } from '../sync/sources.js';
+import { adminCodesRouter } from './admin-codes.js';
+import { listCodes, missingSubjects } from '../lib/access-codes.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -99,12 +101,24 @@ export function adminRouter({ broadcast }) {
   router.use(requireAdmin);
 
   /* ---------------------------------------------------------------- *
+   * Access codes
+   * ---------------------------------------------------------------- */
+
+  router.use('/codes', adminCodesRouter());
+
+  /* ---------------------------------------------------------------- *
    * Overview
    * ---------------------------------------------------------------- */
 
   router.get('/overview', (req, res) => {
     const count = (t) => db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n;
+    const liveCodes = listCodes();
     res.json({
+      codes: {
+        live: liveCodes.length,
+        neverUsed: liveCodes.filter((c) => !c.lastUsedAt).length,
+        missing: missingSubjects().length,
+      },
       counts: {
         people: count('people'),
         teams: count('teams'),

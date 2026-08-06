@@ -8,8 +8,16 @@ import { createApp } from './app.js';
 import { clearChangeFlags } from './lib/mutations.js';
 import { startPolling, syncStatus } from './sync/index.js';
 import { usingDefaultPassword } from './lib/auth.js';
+import { eventTimeState } from './lib/event-time.js';
 
 const PORT = Number(process.env.PORT || 4000);
+
+/**
+ * Resolve the event timezone before anything serves a request, so a bad
+ * EVENT_TIMEZONE stops the deploy instead of quietly shifting ~280 schedules.
+ * It throws with the fix in the message; there is no fallback on purpose.
+ */
+const eventTime = eventTimeState();
 
 /**
  * One broadcast channel for everyone. Payloads carry only the fact that
@@ -46,6 +54,10 @@ server.listen(PORT, () => {
   const status = syncStatus();
   console.log(`\n  Royalty schedule server → http://localhost:${PORT}`);
   console.log(`  Database: ${dbPath}`);
+  console.log(
+    `  Event time: ${eventTime.wallClock.replace('T', ' ')} ${eventTime.abbreviation} ` +
+      `(${eventTime.timezone}, UTC${eventTime.utcOffset})`
+  );
   console.log(`  Schedule source: ${status.activeLabel}${status.canPull ? ' (re-sync available)' : ''}`);
   if (usingDefaultPassword()) {
     console.log('  Admin password: royalty-admin  ← set ADMIN_PASSWORD before the event\n');

@@ -57,7 +57,7 @@ export default function NowNext({
           {nextBlocks.length > 0 && (
             <div className="hero-also">
               Next: <strong>{nextBlocks[0].activity}</strong> ·{' '}
-              {countdown(blockStart(nextBlocks[0], days), at)}
+              {countdown(blockStart(nextBlocks[0]), at)}
             </div>
           )}
         </div>
@@ -66,7 +66,7 @@ export default function NowNext({
   }
 
   const [primary, ...also] = nextBlocks;
-  const start = blockStart(primary, days);
+  const start = blockStart(primary);
   const dayLabel = days.find((d) => d.key === primary.day)?.label ?? primary.day;
 
   return (

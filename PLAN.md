@@ -22,11 +22,14 @@ offline fallback and auto-recovery, CSV import with preview/commit, force
 re-sync, all three targeting modes (team / person / role), and graceful
 recovery from a stale saved session.
 
-**Not yet true of this project:** no tests, no deployment, no real data, no
-access control on the viewer.
+**Not yet true of this project:** no deployment, no real data.
 
-Phase A items 1–3 are done. The open decisions are resolved (see below); items 12
-and 13 were reshaped by them.
+**Phase A (1–4) and Phase B (5–8) are done, plus item 9.** The viewer is behind
+access codes, enforced server-side and covered by tests; times are resolved
+against the venue's timezone by the server. 73 tests run under `npm test`. The
+open decisions are resolved (see below); items 12 and 13 were reshaped by them.
+
+Next up, per the build order: **items 13, 11, 14, 10**.
 
 ### Build order
 
@@ -387,11 +390,52 @@ item 14's correctness pass.
 
 ## Phase C — Reliability core
 
-### 9. `[ ]` Pin an explicit event timezone
+### 9. `[x]` Pin an explicit event timezone
 
 Server-authoritative. Today "now / next" renders against the phone's clock, so a
 traveller's mis-set device sees a silently shifted schedule. Wrong is worse than
 absent here, because now/next is the whole product.
+
+**Done 2026-08-06** — `server/lib/event-time.js`, `client/src/clock.ts`, a
+rewritten `client/src/time.ts`, and 21 new tests (73 total).
+
+```bash
+npm test
+```
+
+**The split that makes this work:** the server knows the zone and turns
+`(date, HH:MM)` into an absolute instant; the client knows that time is passing
+and only ever compares instants. Every block now leaves the server with
+`startsAt` / `endsAt` alongside its wall-clock strings, and **nothing in the
+client parses a date string or reads the device's timezone any more.** The old
+`new Date(`${day.date}T00:00:00`)` was parsed in the *phone's* zone, which is
+the entire bug.
+
+- **Two different device faults, two different fixes.** A wrong *timezone* is
+  handled by not asking the device. A wrong *clock* is handled by measuring it:
+  every payload carries the server's `now`, and the client applies the
+  difference. Demonstrated in the browser — a device pushed 3 hours fast showed
+  "in 5h 8m", and after one refetch re-measured the drift, "in 8h 8m".
+- **A bad `EVENT_TIMEZONE` stops the server**, and abbreviations and fixed
+  offsets (`EST`, `-05:00`) are refused by name. There is deliberately no
+  fallback: falling back to a default would be the exact silent failure this
+  item exists to prevent, and the only way to hit it is a config change with
+  someone watching. The boot banner prints the resolved zone and offset.
+- **`?now=` is now venue wall-clock**, resolved by the server via `/api/time`,
+  so a rehearsal stands where an attendee stands. The viewer shows a banner
+  while it's pinned — otherwise a rehearsal is indistinguishable from the live
+  app, and someone eventually acts on it.
+- **`/api/schedule` still reads no query parameters.** The time override goes
+  through `/api/time`, which carries no event data and needs no session, rather
+  than qualifying the property item 6 left behind.
+- **Past-midnight blocks are resolved server-side and tested** — Friday 23:30 →
+  Saturday 03:45 is a real call time here. That closes part of item 14.
+- The offline cache is now `royalty.schedule.v2.`; v1 payloads have no instants
+  and are dropped rather than adapted. Zone comes from the cache, "now" never
+  does — a cache's timestamp is however old the cache is.
+
+Also fixed a stale README line claiming the viewer has no login (untrue since
+item 6), and added `EVENT_TIMEZONE` and `PUBLIC_BASE_URL` to `.env.example`.
 
 ### 10. `[ ]` Add a service worker for the offline app shell
 
@@ -453,7 +497,8 @@ boolean, and no fourth targeting mode.
 - Deleting a person or team orphans their schedule blocks.
 - "Last updated" is global, so everyone sees a fresh timestamp when any team
   changes — mildly alarming and slightly dishonest.
-- Past-midnight blocks are handled in code but never tested.
+- ~~Past-midnight blocks are handled in code but never tested.~~ Closed by item
+  9 — they are resolved server-side now, with tests.
 - Placeholder seed blocks aren't in any import's managed set (there's a "clear
   placeholder blocks" action for this — confirm it's still correct after item 12).
 
@@ -582,7 +627,7 @@ for "I lost my link" at the check-in desk.
 | ~~Access codes look enforced but aren't~~ | Closed — subject derives from the session only, 21 authorization tests | 6 |
 | Socket CORS reflects any origin, and item 11 adds data to broadcasts | Lock the origin down as part of item 11, not after | 11 |
 | Reload while offline shows a browser error | Service worker | 10 |
-| Timezone silently shifts every time shown | Server-authoritative timezone | 9 |
+| ~~Timezone silently shifts every time shown~~ | Closed — instants resolved server-side, device clock drift corrected, 21 tests | 9 |
 | Real spreadsheet doesn't match the template | Logistics authors in our template; importer validates and rejects loudly | 12 |
 | Template isn't final in time to rehearse against | Track it as a dated dependency, not a background task; T-2 weeks is the drop-dead | 12, 26 |
 | Dancer schedules have no source and never get authored | Named owner for the content work at item 24 | 24 |

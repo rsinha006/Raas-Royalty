@@ -23,19 +23,36 @@ npm run dev
 
 | Surface | URL | Access |
 | --- | --- | --- |
-| Participant viewer | `/` | The shared link. No login. |
+| Participant viewer | `/` | A personal access code, usually opened as `/s/:code` |
 | Logistics panel | `/admin` | Shared password (`ADMIN_PASSWORD`, default `royalty-admin`) |
 
 Copy `.env.example` to `.env` and set `ADMIN_PASSWORD` before the real event.
+Codes are managed in the panel's **Access codes** tab, or from the CLI:
+
+```bash
+npm run codes -- --list
+```
+
+### Event time
+
+Every schedule time is resolved server-side against one IANA timezone
+(`EVENT_TIMEZONE`, default `America/Indiana/Indianapolis`) and sent to clients
+as an absolute instant. A phone on the wrong timezone — or with the wrong clock
+— therefore cannot shift what it shows. Set the zone by region name; the server
+refuses to start on an abbreviation or fixed offset, because those ignore
+daylight saving and would put the whole event an hour out for half the year.
 
 ### Rehearsing the live view
 
 The seeded event is Fri 7 / Sat 8 Aug 2026. To see the app as it behaves
-mid-event, pass a time override:
+mid-event, pass a time override — read as **venue** wall-clock, not yours:
 
 ```bash
 open "http://localhost:4000/?now=2026-08-08T13:05"
 ```
+
+The viewer shows a banner while a rehearsal time is pinned, so it can't be
+mistaken for the live app.
 
 ## Stack
 

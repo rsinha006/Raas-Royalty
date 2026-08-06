@@ -5,10 +5,11 @@ import { cacheSchedule, readAnyCachedSchedule } from '../session';
 import type { Block, SchedulePayload } from '../types';
 import {
   buildTimeline,
-  currentTime,
+  formatDayDate,
   formatTimestamp,
   nextGroup,
 } from '../time';
+import { eventNow, eventZoneAbbreviation, isRehearsing, syncClock } from '../clock';
 import BlockCard from './BlockCard';
 import ContactCard from './ContactCard';
 import NowNext from './NowNext';
@@ -71,6 +72,10 @@ export default function ScheduleScreen({
     try {
       // No parameters: the server derives the subject from the session cookie.
       const data = await api.get<SchedulePayload>('/api/schedule');
+      // Re-measure the device's clock drift on every load, so a phone that
+      // wakes up with the wrong time corrects itself at the next poll rather
+      // than counting down to the wrong minute all weekend.
+      syncClock(data.eventTime);
       const prev = payloadRef.current;
       if (prev) {
         const delta = diffBlocks(prev.blocks, data.blocks);
@@ -101,6 +106,8 @@ export default function ScheduleScreen({
       if (!payloadRef.current) {
         const cached = readAnyCachedSchedule();
         if (cached) {
+          // Take the timezone from the cache but not its clock — see syncClock.
+          syncClock(cached.eventTime, { measureDrift: false });
           payloadRef.current = cached;
           setPayload(cached);
           setStale(true);
@@ -126,7 +133,7 @@ export default function ScheduleScreen({
   const liveStatus = useLive(load);
   useTicker(30_000);
 
-  const at = currentTime();
+  const at = eventNow();
   const days = payload?.days ?? [];
   const blocks = payload?.blocks ?? [];
 
@@ -174,6 +181,7 @@ export default function ScheduleScreen({
   }
 
   const changedTotal = changes.added + changes.updated + changes.removed;
+  const zoneLabel = eventZoneAbbreviation();
 
   return (
     <div className="app">
@@ -197,11 +205,27 @@ export default function ScheduleScreen({
             {stale
               ? `Offline · last known ${formatTimestamp(payload.updatedAt)}`
               : `Last updated ${formatTimestamp(payload.updatedAt)}`}
+            {/* Every time on this screen is venue time. Saying so once is what
+                tells a traveller their phone's clock is not the reference. */}
+            {zoneLabel ? ` ${zoneLabel}` : ''}
           </span>
         </div>
       </header>
 
       <div className="screen">
+        {/* Without this, a rehearsal at a pinned time is indistinguishable from
+            the live app — and someone would eventually act on it. */}
+        {isRehearsing() && (
+          <div className="banner info" style={{ marginTop: 12 }}>
+            <span aria-hidden="true">🕐</span>
+            <span>
+              Showing <strong>{formatTimestamp(at.toISOString())}</strong>
+              {zoneLabel ? ` ${zoneLabel}` : ''} — a rehearsal time from the URL, not the live
+              clock. Remove <code>?now=</code> to follow real time.
+            </span>
+          </div>
+        )}
+
         {stale && (
           <div className="banner offline" style={{ marginTop: 12 }}>
             <span aria-hidden="true">⚠️</span>
@@ -238,12 +262,7 @@ export default function ScheduleScreen({
               onClick={() => setDay(d.key)}
             >
               {d.label}
-              <span className="daytab-date">
-                {new Date(`${d.date}T00:00:00`).toLocaleDateString([], {
-                  month: 'short',
-                  day: 'numeric',
-                })}
-              </span>
+              <span className="daytab-date">{formatDayDate(d)}</span>
             </button>
           ))}
         </div>

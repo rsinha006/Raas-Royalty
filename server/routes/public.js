@@ -5,6 +5,7 @@ import {
   listTeamMembers,
 } from '../lib/queries.js';
 import { scheduleUpdatedAt, db } from '../db.js';
+import { eventTimeState, instantFromWallClockString } from '../lib/event-time.js';
 import {
   requireViewer,
   resolveViewerSession,
@@ -57,6 +58,27 @@ export function publicRouter() {
   /** Event name and nothing else. See getBootstrap. */
   router.get('/bootstrap', (req, res) => {
     res.json(getBootstrap());
+  });
+
+  /**
+   * What time the server thinks it is, and where.
+   *
+   * Unauthenticated on purpose: it carries no event data, and both the viewer
+   * and the admin panel need it before anything else renders — the viewer to
+   * correct its clock drift before the first now/next, the panel to show times
+   * in venue terms. `?at=` resolves a rehearsal wall-clock (`?now=` in the
+   * viewer URL) against the event zone.
+   *
+   * Note the schedule endpoint is deliberately not the one that does this: it
+   * still reads no query parameters at all, which is the property item 6 left
+   * behind and worth keeping unqualified.
+   */
+  router.get('/time', (req, res) => {
+    const override = req.query.at ? instantFromWallClockString(req.query.at) : null;
+    if (req.query.at && !override) {
+      return res.status(400).json({ error: 'Expected at=YYYY-MM-DDTHH:MM' });
+    }
+    res.json({ ...eventTimeState(), ...(override ? { resolvedAt: override.toISOString() } : {}) });
   });
 
   /* ---------------------------- session ---------------------------- */

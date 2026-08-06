@@ -6,6 +6,12 @@ import type { TemplateColumn } from '../types';
 interface OverviewData {
   counts: Record<string, number>;
   codes: { live: number; neverUsed: number; missing: number };
+  eventTime: {
+    timezone: string;
+    wallClock: string;
+    abbreviation: string;
+    utcOffset: string;
+  };
   updatedAt: string | null;
   sync: {
     activeId: string;
@@ -64,6 +70,29 @@ export default function Overview({
             <div className="k">Contacts</div>
           </div>
         </div>
+      </div>
+
+      <div className="card">
+        <h3>Event time</h3>
+        <p className="small muted">
+          Every time in the app — yours and every attendee's — is rendered in this zone, not in the
+          device's. Check it against the venue before the event: a wrong zone shifts every schedule
+          silently, and a shifted schedule looks exactly like a correct one.
+        </p>
+        <div className="list-row">
+          <div>
+            <div className="label">
+              {data.eventTime.wallClock.replace('T', ' ')} {data.eventTime.abbreviation}
+            </div>
+            <div className="sub">
+              <code>{data.eventTime.timezone}</code> · UTC{data.eventTime.utcOffset}
+            </div>
+          </div>
+        </div>
+        <p className="tiny faint" style={{ marginTop: 8 }}>
+          Set with <code>EVENT_TIMEZONE</code>. Use an IANA region name — an abbreviation or fixed
+          offset ignores daylight saving and the server will refuse to start.
+        </p>
       </div>
 
       <div className="card">

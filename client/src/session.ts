@@ -10,7 +10,14 @@ import type { SchedulePayload } from './types';
  * single flag recording that a session once existed.
  */
 
-const SCHEDULE_PREFIX = 'royalty.schedule.v1.';
+/**
+ * v2: cached payloads gained absolute `startsAt` / `endsAt` instants when the
+ * event timezone became server-authoritative. A v1 payload has no way to say
+ * when its blocks actually happen, and guessing on the phone's behalf is the
+ * bug that change removed — so old caches are dropped rather than adapted.
+ */
+const SCHEDULE_PREFIX = 'royalty.schedule.v2.';
+const LEGACY_SCHEDULE_PREFIX = 'royalty.schedule.v1.';
 const SEEN_KEY = 'royalty.seen.v1';
 
 /** Written by an older build, before codes existed. Removed on sight. */
@@ -105,6 +112,12 @@ export function forgetEverything() {
 export function purgeLegacyKeys() {
   try {
     LEGACY_KEYS.forEach((k) => localStorage.removeItem(k));
+    const doomed: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(LEGACY_SCHEDULE_PREFIX)) doomed.push(key);
+    }
+    doomed.forEach((k) => localStorage.removeItem(k));
   } catch {
     /* ignore */
   }

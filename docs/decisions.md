@@ -263,6 +263,23 @@ change must re-derive the zone rather than assume Indiana means one thing.
 **Still pending:** the dates. Not locked as of 2026-08-05. The 2026-08-07 in
 `data/` and in the template's event-date cell are placeholders.
 
+**Implemented 2026-08-06 (item 9)**, with one split worth not re-litigating:
+the server resolves every `(date, HH:MM)` pair into an absolute instant and
+sends **both** — `startTime` for display, `startsAt` for comparison. Blocks
+therefore carry each time twice, which looks redundant and is not.
+
+The wall-clock string is what people read off a call sheet and must survive
+verbatim; the instant is the only thing safe to compare, because comparing
+wall-clock times requires knowing the zone, which is exactly what a phone gets
+wrong. Splitting them this way is what lets the client hold zero timezone logic
+while still ticking a live countdown: it knows *that* time passes, the server
+knows *what* the times mean.
+
+The same reasoning makes a bad `EVENT_TIMEZONE` fatal at startup rather than a
+fallback to the default. A fallback would boot a healthy-looking server serving
+~280 shifted schedules — the precise failure this decision exists to prevent —
+and the only way to reach it is a config change at deploy time.
+
 ---
 
 ## Plan for ~280 participants, load test at 600

@@ -1,24 +1,38 @@
 import { db, getMeta, scheduleUpdatedAt } from '../db.js';
+import { blockInstants, dayInstants, eventTimeState } from './event-time.js';
 
 /* ------------------------------------------------------------------ *
  * Row shaping
  * ------------------------------------------------------------------ */
 
+/**
+ * The join onto `event_days` is what lets every block leave here with absolute
+ * start and end instants. A block on its own knows only `Sat` and `09:00`;
+ * resolving that pair against the event timezone is the server's job, and
+ * doing it here means no caller can forget to.
+ */
 const BLOCK_SELECT = `
   SELECT b.id, b.day, b.start_time, b.end_time, b.activity_label, b.notes,
          b.applies_to_type, b.applies_to_id, b.source, b.source_key,
          b.created_at, b.updated_at, b.last_change,
-         b.location_id, l.venue_name, l.sub_location
+         b.location_id, l.venue_name, l.sub_location, d.date AS day_date
     FROM schedule_blocks b
     LEFT JOIN locations l ON l.id = b.location_id
+    LEFT JOIN event_days d ON d.key = b.day
 `;
 
 function shapeBlock(row) {
+  const { startsAt, endsAt } = blockInstants(row.day_date, row.start_time, row.end_time);
   return {
     id: row.id,
     day: row.day,
     startTime: row.start_time,
     endTime: row.end_time,
+    // Absolute, so the client never interprets a wall-clock time itself.
+    // Null only when the day has no date row — the client shows the block
+    // without a now/next status rather than guessing at one.
+    startsAt: startsAt ? startsAt.toISOString() : null,
+    endsAt: endsAt ? endsAt.toISOString() : null,
     activity: row.activity_label,
     notes: row.notes || null,
     location: row.location_id
@@ -132,7 +146,20 @@ export function listDays() {
   return db
     .prepare('SELECT * FROM event_days ORDER BY sort_order, key')
     .all()
-    .map((d) => ({ key: d.key, label: d.label, date: d.date, sortOrder: d.sort_order }));
+    .map((d) => {
+      const { startsAt, endsAt } = dayInstants(d.date);
+      return {
+        key: d.key,
+        label: d.label,
+        date: d.date,
+        sortOrder: d.sort_order,
+        // Midnight to midnight at the venue. The client picks which day to open
+        // on by comparing instants, so a phone on the wrong timezone cannot
+        // land someone on Saturday's tab while it is still Friday at the venue.
+        startsAt: startsAt ? startsAt.toISOString() : null,
+        endsAt: endsAt ? endsAt.toISOString() : null,
+      };
+    });
 }
 
 /**
@@ -276,6 +303,11 @@ export function getPersonalizedSchedule(session) {
     blocks: blocksForTargets(resolved.targets),
     updatedAt: scheduleUpdatedAt(),
     fetchedAt: new Date().toISOString(),
+    // The server's own clock, carried on every payload. The client measures its
+    // drift from this and counts down from the corrected value, so a phone with
+    // the wrong time set still sees the right "in 20 min". Cached with the rest
+    // of the payload, which is what keeps now/next honest offline.
+    eventTime: eventTimeState(),
   };
 }
 

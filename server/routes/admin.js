@@ -37,6 +37,7 @@ import { applyRosterDiff, computeRosterDiff } from '../sync/diff.js';
 import { uploadSource } from '../sync/sources.js';
 import { adminCodesRouter } from './admin-codes.js';
 import { listCodes, missingSubjects } from '../lib/access-codes.js';
+import { eventTimeState } from '../lib/event-time.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -114,6 +115,9 @@ export function adminRouter({ broadcast }) {
     const count = (t) => db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n;
     const liveCodes = listCodes();
     res.json({
+      // Surfaced so the configured zone can be eyeballed against the venue at
+      // deploy — a wrong one shifts every schedule silently.
+      eventTime: eventTimeState(),
       codes: {
         live: liveCodes.length,
         neverUsed: liveCodes.filter((c) => !c.lastUsedAt).length,

@@ -1,38 +1,28 @@
 import type { Block, EventDay } from './types';
+import { formatInZone } from './clock';
 
 /**
- * All "now / next" reasoning lives here. Block times are stored as a day key
- * plus HH:MM; the event_days table supplies the real date, so the app knows
- * whether 14:30 Saturday is in the past.
+ * All "now / next" reasoning lives here.
+ *
+ * Every function below compares *instants*. Blocks arrive with `startsAt` and
+ * `endsAt` already resolved against the event timezone by the server, and the
+ * current time comes from `clock.ts`, which corrects for a device whose clock
+ * is wrong. Nothing here parses a date string or reads the device's timezone —
+ * that is the whole point. This file used to do `new Date(`${day.date}T00:00`)`,
+ * which is parsed in the *phone's* zone, so a traveller who hadn't changed
+ * their clock saw the entire weekend shifted by their flight.
+ *
+ * `startsAt` is null only for a block on a day with no date row. Those keep
+ * their place in the list and simply get no now/next status, because a
+ * confidently wrong "Right now" is worse than none.
  */
 
-/** `?now=2026-08-08T13:05` lets you rehearse the live view outside the event. */
-export function currentTime(): Date {
-  const override = new URLSearchParams(window.location.search).get('now');
-  if (override) {
-    const d = new Date(override);
-    if (!Number.isNaN(d.getTime())) return d;
-  }
-  return new Date();
+export function blockStart(block: Block): Date | null {
+  return block.startsAt ? new Date(block.startsAt) : null;
 }
 
-export function blockStart(block: Block, days: EventDay[]): Date {
-  const day = days.find((d) => d.key === block.day);
-  const [h, m] = block.startTime.split(':').map(Number);
-  const base = day ? new Date(`${day.date}T00:00:00`) : new Date();
-  base.setHours(h, m, 0, 0);
-  return base;
-}
-
-export function blockEnd(block: Block, days: EventDay[]): Date {
-  const day = days.find((d) => d.key === block.day);
-  const [h, m] = block.endTime.split(':').map(Number);
-  const base = day ? new Date(`${day.date}T00:00:00`) : new Date();
-  base.setHours(h, m, 0, 0);
-  // An end time earlier than the start means it ran past midnight.
-  const start = blockStart(block, days);
-  if (base < start) base.setDate(base.getDate() + 1);
-  return base;
+export function blockEnd(block: Block): Date | null {
+  return block.endsAt ? new Date(block.endsAt) : null;
 }
 
 export type BlockStatus = 'past' | 'now' | 'next' | 'upcoming';
@@ -46,8 +36,9 @@ export interface Timeline {
 }
 
 export function buildTimeline(blocks: Block[], days: EventDay[], at: Date): Timeline {
-  const sorted = [...blocks].sort(
-    (a, b) => blockStart(a, days).getTime() - blockStart(b, days).getTime()
+  const timed = blocks.filter((b) => b.startsAt);
+  const sorted = [...timed].sort(
+    (a, b) => new Date(a.startsAt!).getTime() - new Date(b.startsAt!).getTime()
   );
 
   const now: Block[] = [];
@@ -55,12 +46,13 @@ export function buildTimeline(blocks: Block[], days: EventDay[], at: Date): Time
   const statusById: Record<string, BlockStatus> = {};
 
   for (const b of sorted) {
-    const start = blockStart(b, days);
-    const end = blockEnd(b, days);
-    if (at >= start && at < end) {
+    const start = new Date(b.startsAt!).getTime();
+    const end = b.endsAt ? new Date(b.endsAt).getTime() : start;
+    const t = at.getTime();
+    if (t >= start && t < end) {
       now.push(b);
       statusById[b.id] = 'now';
-    } else if (at < start) {
+    } else if (t < start) {
       if (!next) {
         next = b;
         statusById[b.id] = 'next';
@@ -74,9 +66,9 @@ export function buildTimeline(blocks: Block[], days: EventDay[], at: Date): Time
 
   // Anything starting at the same moment as "next" is equally next.
   if (next) {
-    const nextStart = blockStart(next, days).getTime();
+    const nextStart = new Date(next.startsAt!).getTime();
     for (const b of sorted) {
-      if (statusById[b.id] === 'upcoming' && blockStart(b, days).getTime() === nextStart) {
+      if (statusById[b.id] === 'upcoming' && new Date(b.startsAt!).getTime() === nextStart) {
         statusById[b.id] = 'next';
       }
     }
@@ -85,9 +77,8 @@ export function buildTimeline(blocks: Block[], days: EventDay[], at: Date): Time
   let activeDay: string | null = null;
   const ordered = [...days].sort((a, b) => a.sortOrder - b.sortOrder);
   for (const d of ordered) {
-    const dayEnd = new Date(`${d.date}T00:00:00`);
-    dayEnd.setDate(dayEnd.getDate() + 1);
-    if (at < dayEnd) {
+    if (!d.endsAt) continue;
+    if (at.getTime() < new Date(d.endsAt).getTime()) {
       activeDay = d.key;
       break;
     }
@@ -102,6 +93,10 @@ export function nextGroup(blocks: Block[], timeline: Timeline): Block[] {
   return blocks.filter((b) => timeline.statusById[b.id] === 'next');
 }
 
+/**
+ * `HH:MM` → "1:05 PM". No timezone involved: the stored string already *is*
+ * venue wall-clock, which is what everyone at the venue reads off a call sheet.
+ */
 export function formatTime(hhmm: string): string {
   const [h, m] = hhmm.split(':').map(Number);
   const suffix = h >= 12 ? 'PM' : 'AM';
@@ -113,7 +108,8 @@ export function formatRange(start: string, end: string): string {
   return `${formatTime(start)} – ${formatTime(end)}`;
 }
 
-export function countdown(target: Date, at: Date): string {
+export function countdown(target: Date | null, at: Date): string {
+  if (!target) return '';
   const ms = target.getTime() - at.getTime();
   if (ms <= 0) return 'now';
   const mins = Math.round(ms / 60000);
@@ -126,21 +122,29 @@ export function countdown(target: Date, at: Date): string {
   return `in ${dayCount} day${dayCount === 1 ? '' : 's'}`;
 }
 
+/* --------------------------------------------------------------------- *
+ * Formatting real timestamps
+ *
+ * These take an absolute instant — "last updated", an edit-log entry — and
+ * render it at the venue. A screen mixing venue block times with device-local
+ * timestamps is telling a traveller two different times at once.
+ * --------------------------------------------------------------------- */
+
 export function formatTimestamp(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  return formatInZone(iso, { hour: 'numeric', minute: '2-digit' });
 }
 
 export function formatDateTime(iso: string | null | undefined): string {
-  if (!iso) return '—';
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleString([], {
+  return formatInZone(iso, {
     month: 'short',
     day: 'numeric',
     hour: 'numeric',
     minute: '2-digit',
   });
+}
+
+/** A day tab's date, from the day's own midnight instant. */
+export function formatDayDate(day: EventDay): string {
+  if (!day.startsAt) return '';
+  return formatInZone(day.startsAt, { month: 'short', day: 'numeric' });
 }

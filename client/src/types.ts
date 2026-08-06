@@ -34,6 +34,9 @@ export interface EventDay {
   label: string;
   date: string;
   sortOrder: number;
+  /** Midnight to midnight at the venue, resolved server-side. */
+  startsAt: string | null;
+  endsAt: string | null;
 }
 
 export interface Contact {
@@ -55,8 +58,15 @@ export interface BlockLocation {
 export interface Block {
   id: string;
   day: string;
+  /** Venue wall-clock, as written on the call sheet. For display. */
   startTime: string;
   endTime: string;
+  /**
+   * The same times as absolute instants, resolved against the event timezone by
+   * the server. For every comparison. Null when the block's day has no date.
+   */
+  startsAt: string | null;
+  endsAt: string | null;
   activity: string;
   notes: string | null;
   location: BlockLocation | null;
@@ -112,6 +122,14 @@ export type SignInReason =
   | 'expired'
   | 'network';
 
+export interface EventTime {
+  timezone: string;
+  now: string;
+  wallClock: string;
+  abbreviation: string;
+  utcOffset: string;
+}
+
 export interface SchedulePayload {
   session: { type: Selector; id: string };
   subject: Subject;
@@ -120,6 +138,8 @@ export interface SchedulePayload {
   blocks: Block[];
   updatedAt: string;
   fetchedAt: string;
+  /** The server's clock and zone, so the client can correct its own drift. */
+  eventTime: EventTime;
 }
 
 

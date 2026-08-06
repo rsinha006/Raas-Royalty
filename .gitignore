@@ -12,3 +12,13 @@ client/dist/
 # contact details and must never reach this repo, which is public.
 # Anonymized fixtures derived from them live in fixtures/ and ARE committed.
 samples/
+
+# Working spreadsheets at the repo root. These are the drafts logistics fills
+# in, so they start as placeholders and end up holding ~280 real names and
+# phone numbers. Ignoring the whole root pattern rather than the two current
+# filenames on purpose: the next draft someone saves alongside them is covered
+# without anyone having to remember this file exists.
+#
+# Root level only — fixtures/*.xlsx stays committable, which is where a
+# spreadsheet safe to publish belongs.
+/*.xlsx

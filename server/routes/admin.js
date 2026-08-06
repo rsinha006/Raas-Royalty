@@ -165,17 +165,51 @@ export function adminRouter({ broadcast }) {
     return ts;
   };
 
+  /**
+   * Roles arrive as a set. `roleId` is still accepted as a one-element
+   * shorthand, because a single role is the case for everyone except captains
+   * and it keeps every existing caller — including the roster importer —
+   * working unchanged.
+   */
+  const readRoleIds = (body) => {
+    const raw = Array.isArray(body?.roleIds)
+      ? body.roleIds
+      : body?.roleId !== undefined
+        ? [body.roleId]
+        : null;
+    if (!raw) return null;
+    return [...new Set(raw.map((r) => String(r || '').trim()).filter(Boolean))];
+  };
+
+  /** Rejects unknown ids up front, so a typo can't leave someone role-less. */
+  const unknownRoles = (roleIds) =>
+    roleIds.filter((id) => !db.prepare('SELECT 1 FROM roles WHERE id = ?').get(id));
+
+  const setPersonRoles = (personId, roleIds) => {
+    db.prepare('DELETE FROM person_roles WHERE person_id = ?').run(personId);
+    const ins = db.prepare('INSERT INTO person_roles (person_id, role_id) VALUES (?, ?)');
+    for (const roleId of roleIds) ins.run(personId, roleId);
+  };
+
   router.post('/people', (req, res) => {
-    const { name, roleId, teamId, contactId } = req.body || {};
-    if (!name || !roleId) return res.status(400).json({ error: 'name and roleId are required' });
+    const { name, teamId, contactId } = req.body || {};
+    const roleIds = readRoleIds(req.body);
+    if (!name || !roleIds?.length) {
+      return res.status(400).json({ error: 'name and at least one role are required' });
+    }
+    const unknown = unknownRoles(roleIds);
+    if (unknown.length) return res.status(400).json({ error: `Unknown role(s): ${unknown.join(', ')}` });
+
     const id = newId('per');
-    db.prepare('INSERT INTO people (id, name, role_id, team_id, contact_id) VALUES (?, ?, ?, ?, ?)').run(
-      id,
-      String(name).trim(),
-      roleId,
-      teamId || null,
-      contactId || null
-    );
+    db.transaction(() => {
+      db.prepare('INSERT INTO people (id, name, team_id, contact_id) VALUES (?, ?, ?, ?)').run(
+        id,
+        String(name).trim(),
+        teamId || null,
+        contactId || null
+      );
+      setPersonRoles(id, roleIds);
+    })();
     rosterChanged(req, `Added ${name} to the roster`);
     res.json({ ok: true, id });
   });
@@ -183,19 +217,34 @@ export function adminRouter({ broadcast }) {
   router.patch('/people/:id', (req, res) => {
     const prev = db.prepare('SELECT * FROM people WHERE id = ?').get(req.params.id);
     if (!prev) return res.status(404).json({ error: 'Not found' });
+
+    const roleIds = readRoleIds(req.body);
+    if (roleIds && !roleIds.length) {
+      // Someone with no roles has no role-targeted blocks and no way to be
+      // reached by one — a state worth refusing rather than saving.
+      return res.status(400).json({ error: 'A person needs at least one role' });
+    }
+    if (roleIds) {
+      const unknown = unknownRoles(roleIds);
+      if (unknown.length) {
+        return res.status(400).json({ error: `Unknown role(s): ${unknown.join(', ')}` });
+      }
+    }
+
     const next = {
       name: req.body.name ?? prev.name,
-      roleId: req.body.roleId ?? prev.role_id,
       teamId: req.body.teamId !== undefined ? req.body.teamId || null : prev.team_id,
       contactId: req.body.contactId !== undefined ? req.body.contactId || null : prev.contact_id,
     };
-    db.prepare('UPDATE people SET name = ?, role_id = ?, team_id = ?, contact_id = ? WHERE id = ?').run(
-      next.name,
-      next.roleId,
-      next.teamId,
-      next.contactId,
-      req.params.id
-    );
+    db.transaction(() => {
+      db.prepare('UPDATE people SET name = ?, team_id = ?, contact_id = ? WHERE id = ?').run(
+        next.name,
+        next.teamId,
+        next.contactId,
+        req.params.id
+      );
+      if (roleIds) setPersonRoles(req.params.id, roleIds);
+    })();
     rosterChanged(req, `Updated roster entry for ${next.name}`);
     res.json({ ok: true });
   });
@@ -239,11 +288,37 @@ export function adminRouter({ broadcast }) {
       req.body.liaisonContactId !== undefined
         ? req.body.liaisonContactId || null
         : prev.liaison_contact_id;
-    db.prepare('UPDATE teams SET name = ?, liaison_contact_id = ? WHERE id = ?').run(
-      name,
-      liaison,
-      req.params.id
-    );
+
+    let showOrder = prev.show_order;
+    if (req.body.showOrder !== undefined) {
+      const raw = req.body.showOrder;
+      if (raw === null || raw === '') {
+        showOrder = null;
+      } else {
+        const n = Number(raw);
+        if (!Number.isInteger(n) || n < 1) {
+          return res.status(400).json({ error: 'Running order must be a whole number from 1, or blank' });
+        }
+        showOrder = n;
+      }
+    }
+
+    try {
+      db.prepare(
+        'UPDATE teams SET name = ?, liaison_contact_id = ?, show_order = ? WHERE id = ?'
+      ).run(name, liaison, showOrder, req.params.id);
+    } catch (err) {
+      // SQLite names the column, not the index, in a partial-unique violation.
+      if (String(err.message).includes('teams.show_order')) {
+        const clash = db
+          .prepare('SELECT name FROM teams WHERE show_order = ? AND id != ?')
+          .get(showOrder, req.params.id);
+        return res
+          .status(409)
+          .json({ error: `${clash?.name ?? 'Another team'} is already ${showOrder} in the running order` });
+      }
+      throw err;
+    }
     rosterChanged(req, `Updated team ${name}`);
     res.json({ ok: true });
   });
@@ -523,7 +598,10 @@ export function adminRouter({ broadcast }) {
     const header = tpl.columns.map((c) => csvEscape(c.name)).join(',');
     const sample =
       kind === 'roster'
-        ? [['Jordan Alvarez', 'Dancer', 'Kinetic Motion', 'Sam Okafor / +1-555-0102']]
+        ? [
+            ['Jordan Alvarez', 'Dancer', 'Kinetic Motion', '', 'Sam Okafor / +1-555-0102'],
+            ['Priya Raman', 'Dancer', 'Kinetic Motion', 'Y', 'Sam Okafor / +1-555-0102'],
+          ]
         : [
             ['Sat', '13:00', '13:12', 'Main Venue', 'Main Stage', 'PERFORMANCE', 'Kinetic Motion', 'Hard cut at 12 min', ''],
             ['Sat', '09:00', '09:30', 'Main Venue', 'Main Stage', 'Call time & safety brief', 'All Dancers', '', ''],

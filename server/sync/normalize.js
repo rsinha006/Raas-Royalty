@@ -31,12 +31,31 @@ export const ROSTER_TEMPLATE = {
     { name: 'Role', required: true, note: 'Must match an existing role label' },
     { name: 'Team', required: false, note: 'Required for dancers; created if new' },
     {
+      name: 'Captain?',
+      required: false,
+      note: 'Y / yes / true / 1 — adds the Captain role on top of their own',
+    },
+    {
       name: 'Contact Person/Method',
       required: false,
       note: 'e.g. "Jamie Rivera / 555-0102" or "jamie@example.com"',
     },
   ],
 };
+
+/** The role a `Captain?` column grants, on top of whatever the Role column says. */
+export const CAPTAIN_ROLE_ID = 'captain';
+
+const TRUTHY = new Set(['y', 'yes', 'true', '1', 'x', 'captain']);
+
+/**
+ * Reads the `Captain?` column. Deliberately strict about what counts as yes:
+ * anything unrecognised is "no", because inventing captains adds people to a
+ * meeting, while missing one is visible to the captain who checks their phone.
+ */
+export function isCaptainCell(raw) {
+  return TRUTHY.has(String(raw ?? '').trim().toLowerCase());
+}
 
 /* ---------------------------- Scalars ---------------------------- */
 
@@ -317,6 +336,15 @@ export function normalizeRosterRows(rawRows) {
       problems.push(`${role.label} rows need a Team`);
     }
 
+    // A captain's second role, from the template's own column. The importer's
+    // only job here is to add the role; it never infers one from a name suffix
+    // — the `*` on a roster name marks a food restriction, not a captain.
+    const captain = isCaptainCell(pick(r, ['Captain?', 'Captain']));
+    const captainRole = captain ? roleByKey.get(CAPTAIN_ROLE_ID) : null;
+    if (captain && !captainRole) {
+      problems.push(`Marked as a captain, but there is no "${CAPTAIN_ROLE_ID}" role`);
+    }
+
     if (problems.length) {
       errors.push({ row: lineNo, message: problems.join('; ') });
       continue;
@@ -326,6 +354,8 @@ export function normalizeRosterRows(rawRows) {
       name,
       roleId: role.id,
       roleLabel: role.label,
+      roleIds: captainRole && captainRole.id !== role.id ? [role.id, captainRole.id] : [role.id],
+      isCaptain: Boolean(captainRole),
       teamName: team || null,
       contact: parseContactCell(
         pick(r, ['Contact Person/Method', 'Contact', 'Contact Method']),

@@ -15,12 +15,25 @@ export interface Team {
   name: string;
   liaisonContactId: string | null;
   memberCount: number;
+  /** Running order, 1–8. Null until the draw. */
+  showOrder: number | null;
+}
+
+export interface RoleLite {
+  id: string;
+  label: string;
+  selector: Selector;
 }
 
 export interface PersonLite {
   id: string;
   name: string;
-  roleId: string;
+  /** Every role held, display order first. Captains hold Dancer + Captain. */
+  roles: RoleLite[];
+  roleIds: string[];
+  /** The display role — the first of `roles`. Null only if someone holds none. */
+  roleId: string | null;
+  roleLabel: string | null;
   teamId: string | null;
 }
 
@@ -92,7 +105,9 @@ export interface Subject {
   id: string;
   name: string;
   kind: 'team' | 'person' | 'role';
-  roleLabel?: string;
+  roleLabel?: string | null;
+  /** Every role's label, for people who hold more than one. */
+  roleLabels?: string[];
   teamName?: string | null;
 }
 

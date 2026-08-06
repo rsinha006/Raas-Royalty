@@ -104,6 +104,16 @@ const seed = db.transaction(() => {
     { id: 'videographer', label: 'Videographer', selector: 'person', blurb: 'Find your name', sort: 4 },
     { id: 'sponsor', label: 'Sponsor', selector: 'person', blurb: 'Find your name', sort: 5 },
     { id: 'logistics', label: 'Logistics & Admin', selector: 'person', blurb: 'Find your name', sort: 6 },
+    /**
+     * An ordinary role row, held *in addition to* Dancer. Sorted last so it
+     * never becomes anyone's display role — a captain reads as a Dancer, which
+     * is what they are; Captain is an overlay carrying three extra blocks.
+     *
+     * `selector: 'person'` means "reached individually", which keeps captains
+     * out of the personal-code list: that query excludes anyone holding a
+     * team-selector role, and a captain still holds Dancer.
+     */
+    { id: 'captain', label: 'Captain', selector: 'person', blurb: 'Team captains', sort: 9 },
   ];
   const insRole = db.prepare(
     'INSERT INTO roles (id, label, selector, blurb, sort_order, active) VALUES (?, ?, ?, ?, ?, 1)'
@@ -164,29 +174,41 @@ const seed = db.transaction(() => {
     'Aftershock',
   ];
   const insTeam = db.prepare(
-    'INSERT INTO teams (id, name, liaison_contact_id) VALUES (?, ?, ?)'
+    'INSERT INTO teams (id, name, liaison_contact_id, show_order) VALUES (?, ?, ?, ?)'
   );
-  const teams = teamNames.map((name) => {
+  const teams = teamNames.map((name, i) => {
     const liaisonName = uniqueName();
     const liaison = makeContact(liaisonName, `Team Liaison — ${name}`, 'Your first point of contact');
     const id = newId('team');
-    insTeam.run(id, name, liaison);
+    // The draw is late in reality; seeded here so the column is exercised.
+    insTeam.run(id, name, liaison, i + 1);
     return { id, name, liaison };
   });
 
   /* -------------------- people -------------------- */
   const insPerson = db.prepare(
-    'INSERT INTO people (id, name, role_id, team_id, contact_id) VALUES (?, ?, ?, ?, ?)'
+    'INSERT INTO people (id, name, team_id, contact_id) VALUES (?, ?, ?, ?)'
   );
+  const insPersonRole = db.prepare(
+    'INSERT INTO person_roles (person_id, role_id) VALUES (?, ?)'
+  );
+  const addPerson = (id, name, roleIds, teamId, contactId) => {
+    insPerson.run(id, name, teamId, contactId);
+    for (const roleId of roleIds) insPersonRole.run(id, roleId);
+  };
   const people = { dancer: [], exec: [], judge: [], videographer: [], sponsor: [], logistics: [] };
+  const captains = [];
 
   teams.forEach((t) => {
     const size = 15 + Math.floor(rand() * 4); // 15–18 dancers per team
     for (let i = 0; i < size; i++) {
       const id = newId('per');
       const name = uniqueName();
-      insPerson.run(id, name, 'dancer', t.id, t.liaison);
+      // Three captains per team, holding Dancer + Captain.
+      const isCaptain = i < 3;
+      addPerson(id, name, isCaptain ? ['dancer', 'captain'] : ['dancer'], t.id, t.liaison);
       people.dancer.push({ id, name, teamId: t.id });
+      if (isCaptain) captains.push({ id, name, teamId: t.id });
     }
   });
 
@@ -195,7 +217,7 @@ const seed = db.transaction(() => {
       const name = uniqueName();
       const own = makeContact(name, titleFn(i));
       const id = newId('per');
-      insPerson.run(id, name, roleId, null, contactId);
+      addPerson(id, name, [roleId], null, contactId);
       people[roleId].push({ id, name, ownContact: own });
     }
   };
@@ -241,6 +263,17 @@ const seed = db.transaction(() => {
   block('Fri', T(14), T(14, 30), L['Lobby / Check-in'], 'Registration opens', 'role', 'dancer',
     'Bring photo ID. One captain checks in for the whole team.');
   block('Fri', T(18), T(19), L["Judges' Lounge"], 'Judges orientation & rubric walkthrough', 'role', 'judge');
+  /**
+   * The three captain-only blocks. One row each, targeted at the Captain role —
+   * which is the entire reason captains hold a second role rather than a
+   * boolean. As person-targeted blocks these would be 24 rows to bulk-shift
+   * when the day runs late, and 24 to re-create by hand if a fourth captain
+   * meeting appears mid-event.
+   */
+  block('Fri', T(17), T(17, 45), L['Grand Ballroom'], "Captains' meeting", 'role', 'captain',
+    'One captain per team minimum. Running order draw happens here.');
+  block('Fri', T(20, 30), T(21), L['Main Stage'], 'Lighting cues check — captains', 'role', 'captain',
+    'Bring your cue sheet.');
   block('Fri', T(19), T(20, 30), L['Grand Ballroom'], 'Sponsor welcome dinner', 'role', 'sponsor',
     'Business casual. Table assignments at the door.');
 
@@ -260,6 +293,8 @@ const seed = db.transaction(() => {
   block('Sat', T(9), T(9, 30), L['Main Stage'], 'All-dancer call time & safety brief', 'role', 'dancer',
     'Mandatory. Roll is taken by team.');
   block('Sat', T(9, 30), T(10), L["Judges' Lounge"], 'Judges check-in & scoring tablets', 'role', 'judge');
+  block('Sat', T(10), T(10, 30), L["Judges' Lounge"], "Captains & judges' briefing", 'role', 'captain',
+    'Scoring questions answered here, not backstage.');
   block('Sat', T(10), T(10, 30), L['Media Booth'], 'Media sync & shot list review', 'role', 'videographer');
   block('Sat', T(11), T(12), L['Grand Ballroom'], 'Exec board sync — run of show', 'role', 'exec');
   block('Sat', T(16), T(17), L['Terrace'], 'Sponsor reception & activation walkthrough', 'role', 'sponsor');
@@ -327,7 +362,15 @@ const codes = backfillAccessCodes({}, { editedBy: 'seed', source: 'seed' });
 console.log(
   `Seeded ${stats.people} people across ${stats.teams} teams, ${stats.blocks} schedule blocks.`
 );
-console.log('Roles: Dancer, Exec Board, Judge, Videographer, Sponsor, Logistics & Admin');
+// Read back rather than hardcoded — the literal list here went stale the first
+// time a role was added.
+console.log(
+  `Roles: ${db
+    .prepare('SELECT label FROM roles ORDER BY sort_order, label')
+    .all()
+    .map((r) => r.label)
+    .join(', ')}`
+);
 console.log(
   `Access codes: ${codes.created} issued across ${codes.total} subjects ` +
     '(one per team, one per staff member; dancers use their team code).'

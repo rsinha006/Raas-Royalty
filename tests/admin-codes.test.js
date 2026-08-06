@@ -46,11 +46,16 @@ function seedFixture() {
     INSERT INTO teams (id,name,liaison_contact_id) VALUES
       ('team_a','Alpha Crew','c_liaison'),
       ('team_b','Beta Crew',NULL);
-    INSERT INTO people (id,name,role_id,team_id,contact_id) VALUES
-      ('p_alice','Alice Alpha','dancer','team_a',NULL),
-      ('p_bianca','Bianca Beta','dancer','team_b',NULL),
-      ('p_judge','Jordan Judge','judge',NULL,'c_judge'),
-      ('p_sponsor','Sasha Sponsor','sponsor',NULL,NULL);
+    INSERT INTO people (id,name,team_id,contact_id) VALUES
+      ('p_alice','Alice Alpha','team_a',NULL),
+      ('p_bianca','Bianca Beta','team_b',NULL),
+      ('p_judge','Jordan Judge',NULL,'c_judge'),
+      ('p_sponsor','Sasha Sponsor',NULL,NULL);
+    INSERT INTO person_roles (person_id,role_id) VALUES
+      ('p_alice','dancer'),
+      ('p_bianca','dancer'),
+      ('p_judge','judge'),
+      ('p_sponsor','sponsor');
   `);
 
   db.prepare(

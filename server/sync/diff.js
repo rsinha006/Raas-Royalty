@@ -148,11 +148,30 @@ export function applyScheduleDiff(diff, ctx) {
 const norm = (s) => String(s ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
 
 export function computeRosterDiff(rows, { removeMissing = false } = {}) {
+  /**
+   * `role_id` is the display role — the lowest-sorting role a person holds —
+   * derived here because the column is gone. It is what identifies a person
+   * across an import ("Jordan Alvarez the dancer" vs "Jordan Alvarez the
+   * judge"), and using the *set* of roles as the key instead would make
+   * promoting someone to captain look like deleting them and hiring a stranger.
+   */
   const people = db
-    .prepare('SELECT p.*, t.name AS team_name FROM people p LEFT JOIN teams t ON t.id = p.team_id')
+    .prepare(
+      `SELECT p.*, t.name AS team_name,
+              (SELECT r.id FROM person_roles pr
+                 JOIN roles r ON r.id = pr.role_id
+                WHERE pr.person_id = p.id
+                ORDER BY r.sort_order, r.label LIMIT 1) AS role_id
+         FROM people p LEFT JOIN teams t ON t.id = p.team_id`
+    )
     .all();
   const teams = db.prepare('SELECT * FROM teams').all();
   const contacts = db.prepare('SELECT * FROM contact_cards').all();
+  const heldRoles = new Map();
+  for (const r of db.prepare('SELECT person_id, role_id FROM person_roles').all()) {
+    if (!heldRoles.has(r.person_id)) heldRoles.set(r.person_id, new Set());
+    heldRoles.get(r.person_id).add(r.role_id);
+  }
 
   const peopleByName = new Map(people.map((p) => [`${norm(p.name)}|${p.role_id}`, p]));
   const teamsByName = new Map(teams.map((t) => [norm(t.name), t]));
@@ -190,6 +209,11 @@ export function computeRosterDiff(rows, { removeMissing = false } = {}) {
     const changes = [];
     if ((prev.team_name ?? null) !== (row.teamName ?? null)) {
       changes.push(`team ${prev.team_name ?? 'none'} → ${row.teamName ?? 'none'}`);
+    }
+    const wanted = row.roleIds ?? [row.roleId];
+    const held = heldRoles.get(prev.id) ?? new Set();
+    if (wanted.length !== held.size || wanted.some((r) => !held.has(r))) {
+      changes.push(`roles ${[...held].sort().join('+') || 'none'} → ${[...wanted].sort().join('+')}`);
     }
     if (row.contact?.name) {
       const prevContact = contacts.find((c) => c.id === prev.contact_id);
@@ -255,16 +279,18 @@ export function applyRosterDiff(diff, ctx) {
     for (const t of diff.createTeams) teamId(t.name);
     for (const c of diff.createContacts) contactId(c);
 
+    const setRoles = (personId, row) => {
+      db.prepare('DELETE FROM person_roles WHERE person_id = ?').run(personId);
+      const ins = db.prepare('INSERT INTO person_roles (person_id, role_id) VALUES (?, ?)');
+      for (const roleId of row.roleIds ?? [row.roleId]) ins.run(personId, roleId);
+    };
+
     for (const { row } of diff.createPeople) {
+      const id = newId('per');
       db.prepare(
-        'INSERT INTO people (id, name, role_id, team_id, contact_id) VALUES (?, ?, ?, ?, ?)'
-      ).run(
-        newId('per'),
-        row.name,
-        row.roleId,
-        row.teamName ? teamId(row.teamName) : null,
-        contactId(row.contact)
-      );
+        'INSERT INTO people (id, name, team_id, contact_id) VALUES (?, ?, ?, ?)'
+      ).run(id, row.name, row.teamName ? teamId(row.teamName) : null, contactId(row.contact));
+      setRoles(id, row);
     }
     for (const item of diff.updatePeople) {
       db.prepare('UPDATE people SET team_id = ?, contact_id = COALESCE(?, contact_id) WHERE id = ?').run(
@@ -272,6 +298,8 @@ export function applyRosterDiff(diff, ctx) {
         contactId(item.row.contact),
         item.id
       );
+      // Rewritten every time, so removing a `Captain?` mark actually demotes.
+      setRoles(item.id, item.row);
     }
     for (const item of diff.deletePeople) {
       db.prepare('DELETE FROM people WHERE id = ?').run(item.id);

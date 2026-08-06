@@ -24,12 +24,13 @@ recovery from a stale saved session.
 
 **Not yet true of this project:** no deployment, no real data.
 
-**Phase A (1–4) and Phase B (5–8) are done, plus item 9.** The viewer is behind
-access codes, enforced server-side and covered by tests; times are resolved
-against the venue's timezone by the server. 73 tests run under `npm test`. The
-open decisions are resolved (see below); items 12 and 13 were reshaped by them.
+**Phase A (1–4) and Phase B (5–8) are done, plus items 9 and 13.** The viewer is
+behind access codes, enforced server-side and covered by tests; times are
+resolved against the venue's timezone by the server; the data model now carries
+multi-role people and a running order. 93 tests run under `npm test`. The open
+decisions are resolved (see below); item 12 was reshaped by them.
 
-Next up, per the build order: **items 13, 11, 14, 10**.
+Next up, per the build order: **items 11, 14, 10**.
 
 ### Build order
 
@@ -477,7 +478,7 @@ within-team name collisions — which are real people, not duplicates.
 `ingest()` contract, validation reporting. Only the tab readers need a frozen
 template.
 
-### 13. `[ ]` Apply model changes from item 3
+### 13. `[x]` Apply model changes from item 3
 
 - **`teams.show_order`** — 1–8, nullable until the draw.
 - **`person_roles` join table** replacing single `people.role_id`.
@@ -488,6 +489,42 @@ template.
 
 No divisions, no multi-team dancers, no second performance, no `is_captain`
 boolean, and no fourth targeting mode.
+
+**Done 2026-08-06** — `server/migrate.js`, `person_roles` in the schema, and 20
+new tests (93 total). Demonstrated in the browser: a captain sees the two Friday
+captain blocks, a teammate on the same team sees neither, and the running order
+is editable with a working clash guard.
+
+```bash
+npm test
+```
+
+- **`people.role_id` is dropped, not kept alongside.** Two homes for the same
+  fact diverge, and then nobody knows which one the schedule query used. A
+  person's *display* role is derived — the role they hold with the lowest
+  `sort_order` — which is why `Captain` sorts last: a captain reads as a
+  "Dancer", which is what they are.
+- **Migrations now exist** (`server/migrate.js`), run on every boot, idempotent.
+  `schema.sql` only ever built fresh databases. Verified against a copy of the
+  real 166-person dev database: all 166 kept their role, none orphaned.
+  ⚠️ Anything depending on a migrated column belongs in `migrate.js`, not
+  `schema.sql` — that file runs first, and the column may not exist yet.
+- **The personal-code rule flipped to a negative form**: a code goes to someone
+  holding *no* team-selector role, rather than someone holding a person-selector
+  one. Under the old positive form a captain's `Captain` role would have earned
+  them a personal code, which is the ~190 unmanaged dancer credentials the
+  access-code decision exists to avoid.
+- **An unidentified team session deliberately gets no Captain blocks.** Before
+  the identity step there is no way to know whose phone it is, and showing the
+  Captains' Meeting to all 25 dancers would have them all turn up to it.
+- The roster importer reads a `Captain?` column, strictly (`Y`/`yes`/`true`/`1`).
+  It **never infers from a name suffix** — the `*` on a roster name is a food
+  restriction. Removing the mark demotes, so the column is authoritative both
+  ways.
+
+**Not built here:** surfacing the running order to participants ("you are 3rd,
+after UTD"). The column, the admin editing and the API are done; what a dancer
+or judge *sees* is schedule content, so it belongs with item 24.
 
 ### 14. `[ ]` Fix the known correctness gaps
 

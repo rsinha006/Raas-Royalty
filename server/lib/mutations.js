@@ -18,9 +18,14 @@ export function audienceForBlock({ appliesToType, appliesToId }) {
     const people = db.prepare('SELECT id FROM people WHERE team_id = ?').all(appliesToId);
     return { personIds: people.map((p) => p.id), teamIds: [appliesToId] };
   }
-  // role
+  // role — through the join table, so a captain counts in both the Dancer
+  // audience and the Captain audience rather than only their display role.
   const people = db
-    .prepare('SELECT id, team_id FROM people WHERE role_id = ?')
+    .prepare(
+      `SELECT p.id, p.team_id FROM people p
+         JOIN person_roles pr ON pr.person_id = p.id
+        WHERE pr.role_id = ?`
+    )
     .all(appliesToId);
   const teamIds = [...new Set(people.map((p) => p.team_id).filter(Boolean))];
   return { personIds: people.map((p) => p.id), teamIds };

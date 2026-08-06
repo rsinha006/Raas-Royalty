@@ -364,6 +364,31 @@ anyone marked `Captain?`. Personalization itself is nearly free —
 `blocksForTargets` already ORs an arbitrary target list, so a second role is one
 more entry in `targets`.
 
+**Implemented 2026-08-06 (item 13)**, with three choices a future session would
+otherwise reopen:
+
+**`people.role_id` was dropped rather than kept as a "primary role".** Keeping it
+would have been the smaller diff, and it is the wrong shape: the same fact in two
+places diverges the first time someone is edited through a path that only knows
+about one of them, and the failure is a schedule query silently using the stale
+half. A person's display role is instead *derived* — the role they hold with the
+lowest `roles.sort_order`. `Captain` is given a high sort order so it never wins
+that comparison, and a captain reads as a "Dancer" everywhere on screen.
+
+**`Captain.selector` is `person`, and the personal-code rule became a negative.**
+`selector` no longer means what it originally did — the role picker it named was
+deleted in item 6 — and now effectively reads "reached individually". The rule
+for issuing a personal code had to flip from *holds a person-selector role* to
+*holds no team-selector role*, because under the positive form a captain's
+`Captain` half would have earned them their own code. That is exactly the pile of
+unmanaged dancer credentials the access-code decision exists to prevent. Worth
+renaming `selector` one day; not worth a migration during event prep.
+
+**A team session that has not identified anyone gets Dancer only, never
+Captain.** Before the identity step the server cannot know whose phone it is, so
+including Captain there would put the Captains' Meeting on all 25 dancers'
+screens. This is the concrete reason changes 1 and 2 above only work together.
+
 ---
 
 ## The template iterates on its own track; the app does not wait for it

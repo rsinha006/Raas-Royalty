@@ -74,16 +74,54 @@ type Mutate = (fn: () => Promise<unknown>) => Promise<void>;
 
 /* ------------------------------ people ------------------------------ */
 
+/**
+ * Roles are a set, so the editor is checkboxes rather than a dropdown. Almost
+ * everyone holds exactly one; the case this exists for is captains, who hold
+ * Dancer + Captain so the three captain-only blocks can be role-targeted.
+ */
+function RolePicker({
+  roles,
+  selected,
+  onChange,
+}: {
+  roles: Role[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const toggle = (id: string) =>
+    onChange(selected.includes(id) ? selected.filter((r) => r !== id) : [...selected, id]);
+
+  return (
+    <div className="field">
+      <label>Roles</label>
+      <div className="row" style={{ flexWrap: 'wrap', gap: 10 }}>
+        {roles.map((r) => (
+          <label key={r.id} className="small row" style={{ gap: 6, whiteSpace: 'nowrap' }}>
+            <input type="checkbox" checked={selected.includes(r.id)} onChange={() => toggle(r.id)} />
+            {r.label}
+          </label>
+        ))}
+      </div>
+      {!selected.length && <p className="tiny faint">Pick at least one.</p>}
+    </div>
+  );
+}
+
 function People({ data, mutate }: { data: RosterData; mutate: Mutate }) {
   const [query, setQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [adding, setAdding] = useState(false);
-  const [form, setForm] = useState({ name: '', roleId: '', teamId: '', contactId: '' });
+  const [form, setForm] = useState<{
+    name: string;
+    roleIds: string[];
+    teamId: string;
+    contactId: string;
+  }>({ name: '', roleIds: [], teamId: '', contactId: '' });
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return data.people
-      .filter((p) => !roleFilter || p.roleId === roleFilter)
+      .filter((p) => !roleFilter || p.roleIds.includes(roleFilter))
       .filter((p) => !q || p.name.toLowerCase().includes(q) || (p.teamName ?? '').toLowerCase().includes(q))
       .slice(0, 200);
   }, [data.people, query, roleFilter]);
@@ -124,29 +162,21 @@ function People({ data, mutate }: { data: RosterData; mutate: Mutate }) {
               <label>Name</label>
               <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
             </div>
-            <div className="field-row">
-              <div className="field">
-                <label>Role</label>
-                <select value={form.roleId} onChange={(e) => setForm({ ...form, roleId: e.target.value })}>
-                  <option value="">Choose…</option>
-                  {data.roles.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="field">
-                <label>Team</label>
-                <select value={form.teamId} onChange={(e) => setForm({ ...form, teamId: e.target.value })}>
-                  <option value="">None</option>
-                  {data.teams.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
+            <RolePicker
+              roles={data.roles}
+              selected={form.roleIds}
+              onChange={(roleIds) => setForm({ ...form, roleIds })}
+            />
+            <div className="field">
+              <label>Team</label>
+              <select value={form.teamId} onChange={(e) => setForm({ ...form, teamId: e.target.value })}>
+                <option value="">None</option>
+                {data.teams.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="field">
               <label>Contact card</label>
@@ -162,10 +192,10 @@ function People({ data, mutate }: { data: RosterData; mutate: Mutate }) {
             </div>
             <button
               className="btn primary"
-              disabled={!form.name || !form.roleId}
+              disabled={!form.name || !form.roleIds.length}
               onClick={() =>
                 mutate(() => api.post('/api/admin/people', form)).then(() => {
-                  setForm({ name: '', roleId: '', teamId: '', contactId: '' });
+                  setForm({ name: '', roleIds: [], teamId: '', contactId: '' });
                   setAdding(false);
                 })
               }
@@ -193,7 +223,7 @@ function PersonRow({ person, data, mutate }: { person: Person; data: RosterData;
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
     name: person.name,
-    roleId: person.roleId,
+    roleIds: person.roleIds,
     teamId: person.teamId ?? '',
     contactId: person.contactId ?? '',
   });
@@ -204,7 +234,7 @@ function PersonRow({ person, data, mutate }: { person: Person; data: RosterData;
         <div style={{ minWidth: 0 }}>
           <div className="label">{person.name}</div>
           <div className="sub">
-            {data.roles.find((r) => r.id === person.roleId)?.label ?? person.roleId}
+            {person.roles.map((r) => r.label).join(' + ') || <em>no role</em>}
             {person.teamName ? ` · ${person.teamName}` : ''}
           </div>
         </div>
@@ -233,28 +263,21 @@ function PersonRow({ person, data, mutate }: { person: Person; data: RosterData;
           <label>Name</label>
           <input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
         </div>
-        <div className="field-row">
-          <div className="field">
-            <label>Role</label>
-            <select value={form.roleId} onChange={(e) => setForm({ ...form, roleId: e.target.value })}>
-              {data.roles.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label>Team</label>
-            <select value={form.teamId} onChange={(e) => setForm({ ...form, teamId: e.target.value })}>
-              <option value="">None</option>
-              {data.teams.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.name}
-                </option>
-              ))}
-            </select>
-          </div>
+        <RolePicker
+          roles={data.roles}
+          selected={form.roleIds}
+          onChange={(roleIds) => setForm({ ...form, roleIds })}
+        />
+        <div className="field">
+          <label>Team</label>
+          <select value={form.teamId} onChange={(e) => setForm({ ...form, teamId: e.target.value })}>
+            <option value="">None</option>
+            {data.teams.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
         </div>
         <div className="field">
           <label>Contact card</label>
@@ -271,6 +294,7 @@ function PersonRow({ person, data, mutate }: { person: Person; data: RosterData;
         <div className="row">
           <button
             className="btn primary sm"
+            disabled={!form.roleIds.length}
             onClick={() => mutate(() => api.patch(`/api/admin/people/${person.id}`, form)).then(() => setEditing(false))}
           >
             Save
@@ -315,26 +339,47 @@ function Teams({ data, mutate }: { data: RosterData; mutate: Mutate }) {
         {data.teams.map((t) => (
           <div className="list-row" key={t.id}>
             <div style={{ minWidth: 0, flex: 1 }}>
-              <div className="label">{t.name}</div>
+              <div className="label">
+                {t.showOrder ? <span className="badge soft">{t.showOrder}</span> : null} {t.name}
+              </div>
               <div className="sub">{t.memberCount} dancers</div>
-              <div className="field" style={{ marginTop: 8 }}>
-                <label>Liaison contact (what dancers on this team see)</label>
-                <select
-                  value={t.liaisonContactId ?? ''}
-                  onChange={(e) =>
-                    mutate(() =>
-                      api.patch(`/api/admin/teams/${t.id}`, { liaisonContactId: e.target.value })
-                    )
-                  }
-                >
-                  <option value="">None</option>
-                  {data.contacts.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                      {c.title ? ` — ${c.title}` : ''}
-                    </option>
-                  ))}
-                </select>
+              <div className="field-row" style={{ marginTop: 8 }}>
+                <div className="field">
+                  <label>Liaison contact (what dancers on this team see)</label>
+                  <select
+                    value={t.liaisonContactId ?? ''}
+                    onChange={(e) =>
+                      mutate(() =>
+                        api.patch(`/api/admin/teams/${t.id}`, { liaisonContactId: e.target.value })
+                      )
+                    }
+                  >
+                    <option value="">None</option>
+                    {data.contacts.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                        {c.title ? ` — ${c.title}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="field">
+                  <label>Running order</label>
+                  <input
+                    type="number"
+                    min={1}
+                    inputMode="numeric"
+                    placeholder="—"
+                    defaultValue={t.showOrder ?? ''}
+                    onBlur={(e) =>
+                      mutate(() =>
+                        api.patch(`/api/admin/teams/${t.id}`, {
+                          showOrder: e.target.value === '' ? null : e.target.value,
+                        })
+                      )
+                    }
+                  />
+                </div>
               </div>
             </div>
             <button

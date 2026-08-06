@@ -27,18 +27,37 @@ CREATE TABLE IF NOT EXISTS contact_cards (
 CREATE TABLE IF NOT EXISTS teams (
   id                 TEXT PRIMARY KEY,
   name               TEXT NOT NULL UNIQUE,
-  liaison_contact_id TEXT REFERENCES contact_cards(id) ON DELETE SET NULL
+  liaison_contact_id TEXT REFERENCES contact_cards(id) ON DELETE SET NULL,
+  -- Running order, 1–8. Nullable until the draw happens, which is late.
+  show_order         INTEGER
 );
+
+-- The unique index on show_order is created in migrate.js, not here: this file
+-- runs first, and on a database that predates the column there is nothing to
+-- index yet. Everything that depends on a migrated column belongs there.
 
 CREATE TABLE IF NOT EXISTS people (
   id         TEXT PRIMARY KEY,
   name       TEXT NOT NULL,
-  role_id    TEXT NOT NULL REFERENCES roles(id),
   team_id    TEXT REFERENCES teams(id) ON DELETE SET NULL,
   contact_id TEXT REFERENCES contact_cards(id) ON DELETE SET NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_people_role ON people(role_id);
+-- Roles are a many-to-many. There was a `people.role_id` column here; it is
+-- gone rather than kept alongside, because two sources of truth for the same
+-- fact diverge and then nobody knows which one the schedule query used.
+--
+-- Almost everyone holds exactly one role — the director confirmed the org chart
+-- has no dual-hatting. The exception is captains, who hold `Dancer` + `Captain`
+-- so that the three captain-only blocks can be role-targeted instead of
+-- duplicated across 27 people. See docs/decisions.md.
+CREATE TABLE IF NOT EXISTS person_roles (
+  person_id TEXT NOT NULL REFERENCES people(id) ON DELETE CASCADE,
+  role_id   TEXT NOT NULL REFERENCES roles(id),
+  PRIMARY KEY (person_id, role_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_person_roles_role ON person_roles(role_id);
 CREATE INDEX IF NOT EXISTS idx_people_team ON people(team_id);
 
 CREATE TABLE IF NOT EXISTS locations (

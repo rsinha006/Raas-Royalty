@@ -3,6 +3,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 
+import { runMigrations } from './migrate.js';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const DB_PATH = process.env.DB_PATH
@@ -16,6 +18,13 @@ db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
 db.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
+
+/**
+ * Schema first, then the changes a populated database needs. Both run on every
+ * boot and both are idempotent, so upgrading is a restart.
+ */
+const migrated = runMigrations(db);
+if (migrated.length) console.log(`[db] migrated: ${migrated.join(', ')}`);
 
 export const dbPath = DB_PATH;
 

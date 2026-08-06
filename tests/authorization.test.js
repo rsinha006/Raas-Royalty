@@ -41,11 +41,16 @@ function seedFixture() {
       ('judge','Judge','person',2,1);
     INSERT INTO event_days (key,label,date,sort_order) VALUES ('Sat','Saturday','2026-08-08',1);
     INSERT INTO teams (id,name) VALUES ('team_a','Alpha Crew'),('team_b','Beta Crew');
-    INSERT INTO people (id,name,role_id,team_id) VALUES
-      ('p_alice','Alice Alpha','dancer','team_a'),
-      ('p_amir','Amir Alpha','dancer','team_a'),
-      ('p_bianca','Bianca Beta','dancer','team_b'),
-      ('p_judge','Jordan Judge','judge',NULL);
+    INSERT INTO people (id,name,team_id) VALUES
+      ('p_alice','Alice Alpha','team_a'),
+      ('p_amir','Amir Alpha','team_a'),
+      ('p_bianca','Bianca Beta','team_b'),
+      ('p_judge','Jordan Judge',NULL);
+    INSERT INTO person_roles (person_id,role_id) VALUES
+      ('p_alice','dancer'),
+      ('p_amir','dancer'),
+      ('p_bianca','dancer'),
+      ('p_judge','judge');
   `);
 
   const block = db.prepare(

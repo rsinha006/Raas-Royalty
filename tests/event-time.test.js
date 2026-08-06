@@ -53,7 +53,8 @@ function seedFixture() {
       ('Fri','Friday','2026-08-07',1),
       ('Sat','Saturday','2026-08-08',2),
       ('Undated','Floating','not-a-date',3);
-    INSERT INTO people (id,name,role_id) VALUES ('p_judge','Jordan Judge','judge');
+    INSERT INTO people (id,name) VALUES ('p_judge','Jordan Judge');
+    INSERT INTO person_roles (person_id,role_id) VALUES ('p_judge','judge');
   `);
 
   const block = db.prepare(

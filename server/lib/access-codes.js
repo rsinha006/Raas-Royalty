@@ -12,9 +12,9 @@
  *             person-targeted blocks (airport pickups) reach them.
  *   staff   — one each: board, liaison, judge, videographer. Roles whose
  *             selector is 'person'.
- *   dancers — none. They reach their schedule through their team's code, so an
- *             individual dancer code would be ~190 extra live credentials
- *             nobody distributes and nobody revokes.
+ *   dancers — none, captains included. They reach their schedule through their
+ *             team's code, so an individual dancer code would be ~190 extra
+ *             live credentials nobody distributes and nobody revokes.
  *   roles   — supported but never issued automatically. A role code exposes
  *             every holder's schedule to anyone with it, so it is an explicit
  *             admin choice for a group with nothing personal on their schedule
@@ -142,13 +142,15 @@ export function listCodes({ includeRevoked = false } = {}) {
                 WHEN 'person' THEN p.name
                 WHEN 'role'   THEN r.label
               END AS subject_label,
-              pr.label AS person_role_label,
-              pt.name  AS person_team_name
+              (SELECT r2.label FROM person_roles x
+                 JOIN roles r2 ON r2.id = x.role_id
+                WHERE x.person_id = p.id
+                ORDER BY r2.sort_order, r2.label LIMIT 1) AS person_role_label,
+              pt.name AS person_team_name
          FROM access_codes c
          LEFT JOIN teams  t  ON c.subject_type = 'team'   AND t.id = c.subject_id
          LEFT JOIN people p  ON c.subject_type = 'person' AND p.id = c.subject_id
          LEFT JOIN roles  r  ON c.subject_type = 'role'   AND r.id = c.subject_id
-         LEFT JOIN roles  pr ON pr.id = p.role_id
          LEFT JOIN teams  pt ON pt.id = p.team_id
         ${includeRevoked ? '' : 'WHERE c.revoked_at IS NULL'}
         ORDER BY c.subject_type, subject_label`
@@ -237,10 +239,14 @@ export function issueCode({ subjectType, subjectId, note = null, regenerate = fa
  * ------------------------------------------------------------------ */
 
 /**
- * Everyone who should hold a code: teams, plus people in roles that identify an
- * individual. Dancers are excluded by their role's `selector` being 'team' —
- * which is the same field the landing page uses, so adding a role needs no
- * change here.
+ * Everyone who should hold a code: teams, plus people reached individually.
+ *
+ * "Reached individually" means holding at least one role and *no* role whose
+ * `selector` is 'team'. The negative form matters now that roles are a set: a
+ * captain holds Dancer + Captain, and issuing them a personal code on the
+ * strength of the Captain half would hand them a second live credential for a
+ * schedule they already reach through their team's code — exactly the ~190
+ * unmanaged dancer codes the access-code decision exists to avoid.
  */
 export function subjectsNeedingCodes({ includeDancers = false } = {}) {
   const teams = db
@@ -250,11 +256,25 @@ export function subjectsNeedingCodes({ includeDancers = false } = {}) {
 
   const people = db
     .prepare(
-      `SELECT p.id, p.name, r.label AS role_label
+      `SELECT p.id, p.name,
+              (SELECT r2.label FROM person_roles x
+                 JOIN roles r2 ON r2.id = x.role_id
+                WHERE x.person_id = p.id
+                ORDER BY r2.sort_order, r2.label LIMIT 1) AS role_label,
+              (SELECT MIN(r3.sort_order) FROM person_roles y
+                 JOIN roles r3 ON r3.id = y.role_id
+                WHERE y.person_id = p.id) AS sort_order
          FROM people p
-         JOIN roles r ON r.id = p.role_id
-        ${includeDancers ? '' : "WHERE r.selector = 'person'"}
-        ORDER BY r.sort_order, p.name`
+        WHERE EXISTS (SELECT 1 FROM person_roles pr WHERE pr.person_id = p.id)
+          ${
+            includeDancers
+              ? ''
+              : `AND NOT EXISTS (
+                   SELECT 1 FROM person_roles pr2
+                     JOIN roles r4 ON r4.id = pr2.role_id
+                    WHERE pr2.person_id = p.id AND r4.selector = 'team')`
+          }
+        ORDER BY sort_order, p.name`
     )
     .all()
     .map((p) => ({

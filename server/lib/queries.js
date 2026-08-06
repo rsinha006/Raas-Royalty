@@ -88,9 +88,9 @@ export function listRoles({ includeInactive = false } = {}) {
 export function listTeams() {
   return db
     .prepare(
-      `SELECT t.id, t.name, t.liaison_contact_id,
+      `SELECT t.id, t.name, t.liaison_contact_id, t.show_order,
               (SELECT COUNT(*) FROM people p WHERE p.team_id = t.id) AS member_count
-         FROM teams t ORDER BY t.name`
+         FROM teams t ORDER BY t.show_order IS NULL, t.show_order, t.name`
     )
     .all()
     .map((t) => ({
@@ -98,7 +98,48 @@ export function listTeams() {
       name: t.name,
       liaisonContactId: t.liaison_contact_id || null,
       memberCount: t.member_count,
+      /** Running order, 1–8. Null until the draw. */
+      showOrder: t.show_order ?? null,
     }));
+}
+
+/**
+ * Every role a person holds, ordered so the first is the one to display.
+ *
+ * "Display role" is derived from `roles.sort_order` rather than stored: a
+ * captain holds Dancer + Captain and should read as a Dancer, and Captain sorts
+ * last precisely because it is an overlay rather than a seat of its own.
+ */
+const ROLES_FOR_PEOPLE = `
+  SELECT pr.person_id, r.id, r.label, r.selector, r.sort_order
+    FROM person_roles pr
+    JOIN roles r ON r.id = pr.role_id
+   ORDER BY r.sort_order, r.label
+`;
+
+function rolesByPerson(personIds = null) {
+  const rows = db.prepare(ROLES_FOR_PEOPLE).all();
+  const wanted = personIds ? new Set(personIds) : null;
+  const map = new Map();
+  for (const r of rows) {
+    if (wanted && !wanted.has(r.person_id)) continue;
+    if (!map.has(r.person_id)) map.set(r.person_id, []);
+    map.get(r.person_id).push({ id: r.id, label: r.label, selector: r.selector });
+  }
+  return map;
+}
+
+/** The roles one person holds, display order first. */
+export function rolesForPerson(personId) {
+  return db
+    .prepare(
+      `SELECT r.id, r.label, r.selector
+         FROM person_roles pr
+         JOIN roles r ON r.id = pr.role_id
+        WHERE pr.person_id = ?
+        ORDER BY r.sort_order, r.label`
+    )
+    .all(personId);
 }
 
 export function listPeople({ roleId = null } = {}) {
@@ -107,7 +148,8 @@ export function listPeople({ roleId = null } = {}) {
         .prepare(
           `SELECT p.*, t.name AS team_name FROM people p
              LEFT JOIN teams t ON t.id = p.team_id
-            WHERE p.role_id = ? ORDER BY p.name`
+             JOIN person_roles pr ON pr.person_id = p.id AND pr.role_id = ?
+            ORDER BY p.name`
         )
         .all(roleId)
     : db
@@ -116,14 +158,23 @@ export function listPeople({ roleId = null } = {}) {
              LEFT JOIN teams t ON t.id = p.team_id ORDER BY p.name`
         )
         .all();
-  return rows.map((p) => ({
-    id: p.id,
-    name: p.name,
-    roleId: p.role_id,
-    teamId: p.team_id || null,
-    teamName: p.team_name || null,
-    contactId: p.contact_id || null,
-  }));
+  const roles = rolesByPerson(rows.map((p) => p.id));
+  return rows.map((p) => {
+    const held = roles.get(p.id) ?? [];
+    return {
+      id: p.id,
+      name: p.name,
+      roles: held,
+      roleIds: held.map((r) => r.id),
+      // The display role. Kept as `roleId` because that is what it means to
+      // every screen that shows one role next to a name.
+      roleId: held[0]?.id ?? null,
+      roleLabel: held[0]?.label ?? null,
+      teamId: p.team_id || null,
+      teamName: p.team_name || null,
+      contactId: p.contact_id || null,
+    };
+  });
 }
 
 export function listContacts() {
@@ -200,13 +251,20 @@ export function listTeamMembers(teamId) {
  *
  * Matching is three-way per the data model: a block can target a team, a single
  * person, or an entire role. A dancer's team session sees team blocks plus
- * all-dancer role blocks; an individual sees their own blocks, their role's
- * blocks, and their team's blocks if they have one.
+ * all-dancer role blocks; an individual sees their own blocks, *every* role
+ * they hold, and their team's blocks if they have one.
  */
 export function resolveSession({ type, id }) {
   if (type === 'team') {
     const team = db.prepare('SELECT * FROM teams WHERE id = ?').get(id);
     if (!team) return null;
+    /**
+     * A team session that hasn't identified anyone yet gets the team-wide role
+     * only — the one whose members are reached through a team code. Notably it
+     * does *not* get Captain: before the identity step there is no way to know
+     * whether the phone belongs to a captain, and showing the Captains Meeting
+     * to all 25 dancers would have them turn up to it.
+     */
     const dancerRole = db
       .prepare("SELECT id FROM roles WHERE selector = 'team' ORDER BY sort_order LIMIT 1")
       .get();
@@ -226,18 +284,23 @@ export function resolveSession({ type, id }) {
   if (type === 'person') {
     const person = db
       .prepare(
-        `SELECT p.*, r.label AS role_label, t.name AS team_name, t.liaison_contact_id
+        `SELECT p.*, t.name AS team_name, t.liaison_contact_id
            FROM people p
-           JOIN roles r ON r.id = p.role_id
            LEFT JOIN teams t ON t.id = p.team_id
           WHERE p.id = ?`
       )
       .get(id);
     if (!person) return null;
 
+    /**
+     * Every role, not one. This is the line that makes a captain's three blocks
+     * reach them: they hold Dancer + Captain, so both role targets go into the
+     * OR list and `blocksForTargets` needs no change at all.
+     */
+    const roles = rolesForPerson(person.id);
     const targets = [
       { type: 'person', id: person.id },
-      { type: 'role', id: person.role_id },
+      ...roles.map((r) => ({ type: 'role', id: r.id })),
     ];
     if (person.team_id) targets.push({ type: 'team', id: person.team_id });
 
@@ -250,10 +313,13 @@ export function resolveSession({ type, id }) {
         id: person.id,
         name: person.name,
         kind: 'person',
-        roleLabel: person.role_label,
+        // The display role is the first by sort order — Dancer for a captain,
+        // since Captain is an overlay on it rather than a separate seat.
+        roleLabel: roles[0]?.label ?? null,
+        roleLabels: roles.map((r) => r.label),
         teamName: person.team_name || null,
       },
-      roleId: person.role_id,
+      roleId: roles[0]?.id ?? null,
       targets,
       contact: shapeContact(db.prepare('SELECT * FROM contact_cards WHERE id = ?').get(contactId)),
     };

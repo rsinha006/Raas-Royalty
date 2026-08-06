@@ -63,9 +63,10 @@ process, one file database, real WebSockets. No external services.
 
 | Table | Notes |
 | --- | --- |
-| `roles` | Roles are **data**, not an enum. `selector` decides whether picking that role then asks for a team or a name. Admins can add roles without a deploy. |
-| `teams` | `liaison_contact_id` is what that team's dancers see as their contact. |
-| `people` | `team_id` nullable (dancers only), `contact_id` optional. |
+| `roles` | Roles are **data**, not an enum. `selector` marks whether a role is reached individually or through a team. Admins can add roles without a deploy. |
+| `teams` | `liaison_contact_id` is what that team's dancers see as their contact. `show_order` is the running order, 1–8, null until the draw. |
+| `people` | `team_id` nullable (dancers only), `contact_id` optional. Roles live in `person_roles`, not here. |
+| `person_roles` | Many-to-many. Almost everyone holds one role; captains hold `Dancer` + `Captain` so three captain-only blocks can be role-targeted. Display role = lowest `sort_order`. |
 | `contact_cards` | Name, title, phone, email, note. |
 | `locations` | `venue_name` + `sub_location` ("Main Venue → Green Room B"). |
 | `event_days` | Fri/Sat as rows with real dates, so "now / next" knows what's past. |
@@ -76,9 +77,12 @@ process, one file database, real WebSockets. No external services.
 
 A block targets a team, a single person, or a whole role.
 
-- A **team session** sees its team's blocks plus the dancer role's blocks.
-- A **person session** sees their own blocks, their role's blocks, and their
-  team's blocks if they have a team.
+- A **team session** — a team code, before the "which dancer are you?" step —
+  sees its team's blocks plus the dancer role's blocks. Not Captain: there is no
+  way yet to know whose phone it is.
+- A **person session** sees their own blocks, the blocks of *every* role they
+  hold, and their team's blocks if they have a team. This is what carries the
+  captain-only blocks to a captain and to nobody else.
 
 ## Import and sync
 

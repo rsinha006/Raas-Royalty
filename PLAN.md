@@ -13,24 +13,24 @@ competition weekend. **Read this at the start of every session.**
 
 ## Where things stand
 
-**Draft is complete and manually verified end to end.** Viewer, admin panel,
-import pipeline, live updates, and offline caching all work. Nothing from the
-task list below has been started.
+**Done: Phase A (1–4), Phase B (5–8), and items 9 and 13.** Last updated
+2026-08-06.
 
-Verified working in the browser: live push with per-user change highlighting,
-offline fallback and auto-recovery, CSV import with preview/commit, force
-re-sync, all three targeting modes (team / person / role), and graceful
-recovery from a stale saved session.
+- The viewer is **behind access codes**, enforced server-side, with the roster
+  no longer enumerable. Codes are managed and exported from the admin panel.
+- Event times are **resolved server-side against the venue's timezone**, so a
+  phone on the wrong zone or the wrong clock cannot shift what it shows.
+- The data model carries **multi-role people** (captains hold Dancer + Captain)
+  and a **running order** on teams.
+- **93 tests** run under `npm test`, covering authorization negatives, timezone
+  and DST, code management, and the schema migration.
 
-**Not yet true of this project:** no deployment, no real data.
+The open decisions are all resolved (see below); item 12 was reshaped by them.
 
-**Phase A (1–4) and Phase B (5–8) are done, plus items 9 and 13.** The viewer is
-behind access codes, enforced server-side and covered by tests; times are
-resolved against the venue's timezone by the server; the data model now carries
-multi-role people and a running order. 93 tests run under `npm test`. The open
-decisions are resolved (see below); item 12 was reshaped by them.
+**Not yet true of this project:** no deployment, no real data, no service
+worker, and every change still wakes every client.
 
-Next up, per the build order: **items 11, 14, 10**.
+**Next up, per the build order: items 11, 14, 10.**
 
 ### Build order
 
@@ -38,11 +38,10 @@ Next up, per the build order: **items 11, 14, 10**.
 It blocks **item 12 only**, plus the parts of 19 and 24 that depend on it.
 Everything else proceeds now, in this order:
 
-1. **Item 4** — anonymized fixtures. Derived from `samples/`, not the template.
-2. **Phase B (5–8)** — access codes. Largest remaining chunk, security-critical,
-   template-independent.
-3. **Items 9, 13, 11, 14, 10** — timezone, the two schema columns, scoped
-   broadcasts, correctness gaps, service worker.
+1. ~~**Item 4** — anonymized fixtures.~~ Done.
+2. ~~**Phase B (5–8)** — access codes.~~ Done.
+3. **Items 9, 13, 11, 14, 10** — timezone ✅, the two schema columns ✅, then
+   scoped broadcasts, correctness gaps, service worker.
 4. **Phase D (15–18)** — admin tooling.
 5. **Item 12 last**, against a frozen template.
 
@@ -585,6 +584,19 @@ authorization, negative cases explicit.
   script."*
 - **Done when:** CI runs green and the authorization negatives are covered.
 
+**Partly done already**, as a side effect of items 6–13. 93 tests in `tests/`:
+
+- ✅ Access-code authorization, negatives explicit (`authorization.test.js`,
+  `admin-codes.test.js`) — the done-when above is met on that clause.
+- ✅ Timezone and midnight, including DST and past-midnight blocks
+  (`event-time.test.js`).
+- ✅ Schema migration against a populated legacy database
+  (`person-roles.test.js`).
+- ❌ **Import pipeline** — time parsing across the accepted formats, assignment
+  resolution, diff classification. Untouched, and the biggest remaining gap.
+- ❌ **No CI script.** `npm test` is run by hand.
+- ❌ Nothing yet runs against the `fixtures/` from item 4.
+
 ### 20. `[ ]` Load test at 2–3× real scale
 
 600 connections, a burst of admin edits, a mass reconnect. (Raised from 400:
@@ -668,7 +680,8 @@ for "I lost my link" at the check-in desk.
 | Real spreadsheet doesn't match the template | Logistics authors in our template; importer validates and rejects loudly | 12 |
 | Template isn't final in time to rehearse against | Track it as a dated dependency, not a background task; T-2 weeks is the drop-dead | 12, 26 |
 | Dancer schedules have no source and never get authored | Named owner for the content work at item 24 | 24 |
-| ~~Late schema change forces rework~~ | Closed — model confirmed against past-year data | 2, 3 |
+| ~~Late schema change forces rework~~ | Closed — model confirmed against past-year data, and applied in item 13 with a migration that runs on boot | 2, 3, 13 |
+| Real roster still not in hand | A people problem, not an engineering one — it was due at T-6 and is the likeliest thing to slip past the rehearsal | 24 |
 | Thundering herd on every change | Audience-scoped broadcasts + load test | 11, 20 |
 | Total app failure during the event | Backups, monitoring, printed fallback | 23, 28 |
 
@@ -682,9 +695,9 @@ the two that actually catch problems.
 
 | When | Focus |
 | --- | --- |
-| T-6 weeks | Phase A. Start chasing real rosters now — it's a people problem and usually the long pole. |
-| T-5 | Phase B (access codes). |
-| T-4 | Phase C (reliability core). |
+| ~~T-6 weeks~~ | ~~Phase A.~~ Done — but **real rosters are still not in hand**, and that is a people problem, not an engineering one. Chase it now; it is usually the long pole. |
+| ~~T-5~~ | ~~Phase B (access codes).~~ Done. |
+| T-4 | Phase C (reliability core) — items 9 ✅ and 13 ✅ done; 11, 14, 10 remain. |
 | T-3 | Phase D + E (admin tooling, tests, load test). |
 | T-2 | Phase F + item 21 (deploy, ops, devices). |
 | T-1 | Items 24–26. Dress rehearsal. |

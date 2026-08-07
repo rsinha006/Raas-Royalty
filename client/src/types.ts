@@ -169,6 +169,31 @@ export interface EditLogEntry {
   audience: { personIds: string[]; teamIds: string[] } | null;
 }
 
+/**
+ * One block's part in a bulk time shift. `to` is present when it can move;
+ * `blocked` when it cannot, and then the row is shown but not selectable.
+ */
+export interface ShiftMove {
+  id: string;
+  activity: string;
+  appliesTo: { type: TargetType; id: string };
+  /** The version this was previewed at — handed back as the concurrency token. */
+  updatedAt: string;
+  from: { day: string; startTime: string; endTime: string };
+  to?: { day: string; startTime: string; endTime: string };
+  blocked?: 'no-day' | 'unreadable';
+  /** Which way it crossed midnight, when that is why it is blocked. */
+  crosses?: number;
+}
+
+export interface ShiftPreview {
+  day: string;
+  fromTime: string;
+  minutes: number;
+  moves: ShiftMove[];
+  blocked: ShiftMove[];
+}
+
 export interface AssignmentTarget {
   type: TargetType;
   id: string;

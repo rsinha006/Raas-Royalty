@@ -85,6 +85,24 @@ A block targets a team, a single person, or a whole role.
   hold, and their team's blocks if they have a team. This is what carries the
   captain-only blocks to a captain and to nobody else.
 
+## Running late
+
+The Schedule tab's **Shift times** does what running late actually needs:
+"everything from 3pm moves 20 minutes", across every team at once, instead of
+forty individual edits.
+
+Pick the day tab, set the cutoff and the offset, and you get the exact list of
+blocks that would move with their before and after times. Untick anything that
+isn't running late — the airport pickup, a judge's break — and apply. It is
+all-or-nothing: if anyone else has touched one of those blocks since you
+previewed, nothing moves and the panel says which one.
+
+Only blocks that **start** at or after the cutoff move; anything already under
+way keeps its time. A block whose start crosses midnight moves to the next
+event day, and one that would cross into a day the event doesn't have is left
+out and named, because guessing there would write a plausible-looking time
+exactly 24 hours wrong.
+
 ## Import and sync
 
 Everything flows through one pipeline:

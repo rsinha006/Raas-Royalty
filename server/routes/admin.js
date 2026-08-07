@@ -47,6 +47,15 @@ import { adminCodesRouter } from './admin-codes.js';
 import { listCodes, missingSubjects } from '../lib/access-codes.js';
 import { eventTimeState } from '../lib/event-time.js';
 import { roomsForTargets } from '../lib/live.js';
+import {
+  MAX_SHIFT_BLOCKS,
+  MAX_SHIFT_MINUTES,
+  describeShift,
+  parseClock,
+  planMoves,
+  resolveShiftEntries,
+  selectShiftCandidates,
+} from '../lib/time-shift.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -588,6 +597,126 @@ export function adminRouter({ broadcast }) {
     if (removed.conflict) return conflict(res, removed.current);
     const updatedAt = scheduleChanged({ removedBlockIds: [req.params.id] }, [removed.target]);
     res.json({ ok: true, updatedAt });
+  });
+
+  /* ---------------------------------------------------------------- *
+   * Schedule blocks — bulk time shift
+   *
+   * Two steps on purpose, the same shape as an import: preview what would
+   * move, then apply the list that was actually looked at. The apply takes
+   * explicit block ids rather than re-deriving them from the day and cutoff,
+   * so a block someone else added in between cannot be swept into a change
+   * nobody reviewed.
+   * ---------------------------------------------------------------- */
+
+  /** Returns the number, or a message saying why it isn't usable. */
+  const readShiftMinutes = (raw) => {
+    const minutes = Number(raw);
+    if (!Number.isInteger(minutes) || minutes === 0) {
+      return { error: 'Shift by a whole number of minutes, either direction.' };
+    }
+    if (Math.abs(minutes) > MAX_SHIFT_MINUTES) {
+      return {
+        error: `That is more than ${MAX_SHIFT_MINUTES / 60} hours. Re-import the day rather than shifting it.`,
+      };
+    }
+    return { minutes };
+  };
+
+  router.post('/blocks/shift/preview', (req, res) => {
+    const { day, fromTime } = req.body || {};
+    const { minutes, error } = readShiftMinutes(req.body?.minutes);
+    if (error) return res.status(400).json({ error });
+    if (!day) return res.status(400).json({ error: 'Pick a day to shift.' });
+    if (parseClock(fromTime) === null) {
+      return res.status(400).json({ error: 'Give a start time to shift from, as HH:MM.' });
+    }
+
+    const candidates = selectShiftCandidates({ day, fromTime });
+    if (candidates.length > MAX_SHIFT_BLOCKS) {
+      return res.status(400).json({ error: `That selects more than ${MAX_SHIFT_BLOCKS} blocks.` });
+    }
+    const { moves, blocked } = planMoves(candidates, minutes);
+    res.json({ ok: true, day, fromTime, minutes, moves, blocked });
+  });
+
+  router.post('/blocks/shift', (req, res) => {
+    const { minutes, error } = readShiftMinutes(req.body?.minutes);
+    if (error) return res.status(400).json({ error });
+
+    const entries = Array.isArray(req.body?.blocks) ? req.body.blocks : [];
+    if (!entries.length) return res.status(400).json({ error: 'No blocks selected.' });
+    if (entries.length > MAX_SHIFT_BLOCKS) {
+      return res.status(400).json({ error: `Shift at most ${MAX_SHIFT_BLOCKS} blocks at a time.` });
+    }
+    // Unconditional here, unlike a single block edit: every caller of this route
+    // is a screen someone read a list off, and the whole point of the preview is
+    // that what was approved is what gets applied.
+    if (entries.some((e) => !e?.expectedUpdatedAt)) {
+      return res.status(400).json({ error: 'Every block must carry the version it was previewed at.' });
+    }
+
+    /**
+     * Every precondition is checked before anything is written. Half a day's
+     * schedule 20 minutes away from the other half — with nothing on screen
+     * saying which half is which — is worse than a refusal an admin can act on.
+     */
+    const { blocks, missing, conflicts } = resolveShiftEntries(entries);
+    if (missing.length) {
+      return res.status(409).json({
+        error: `${missing.length} of those block(s) have been deleted since you previewed. Nothing was moved.`,
+        reason: 'missing',
+        missing,
+      });
+    }
+    if (conflicts.length) {
+      return res.status(409).json({
+        error: `Someone else changed ${conflicts.length} of those block(s) while you were previewing. Nothing was moved.`,
+        reason: 'conflict',
+        conflicts,
+      });
+    }
+
+    const { moves, blocked } = planMoves(blocks, minutes);
+    if (blocked.length) {
+      return res.status(409).json({
+        error: `${blocked.length} of those block(s) cannot move by that much. Nothing was moved.`,
+        reason: 'blocked',
+        blocked,
+      });
+    }
+
+    const ctx = { editedBy: editorName(req), source: 'admin' };
+    // One transaction, and each block through `updateBlock` — so every move gets
+    // its own edit-log line with an audience and moves its target's timestamp.
+    // "Why did my 3pm move" has to stay answerable per block, not just per batch.
+    const targets = db.transaction(() =>
+      moves.flatMap((m) => {
+        const result = updateBlock(
+          m.id,
+          { day: m.to.day, startTime: m.to.startTime, endTime: m.to.endTime },
+          ctx,
+          { expectedUpdatedAt: m.updatedAt }
+        );
+        // Unreachable in practice — better-sqlite3 is synchronous, so nothing
+        // can land between the check above and here — but a throw rolls the
+        // whole shift back, which is the behaviour to fail towards.
+        if (!result || result.conflict) throw new Error('A block changed mid-shift; nothing was moved.');
+        return result.targets;
+      })
+    )();
+
+    // The summary is what an admin scans the log for; the per-block lines above
+    // are what they drill into once they have found it.
+    logEdit({
+      editedBy: ctx.editedBy,
+      source: 'admin',
+      changeType: 'updated',
+      summary: describeShift(moves, minutes),
+    });
+
+    const updatedAt = scheduleChanged({ changedBlockIds: moves.map((m) => m.id) }, targets);
+    res.json({ ok: true, moved: moves.length, moves, updatedAt });
   });
 
   /* ---------------------------------------------------------------- *

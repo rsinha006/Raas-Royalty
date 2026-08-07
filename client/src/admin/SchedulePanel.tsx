@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, ApiError } from '../api';
-import { formatRange, formatDateTime } from '../time';
-import type { AssignmentTarget, Block, BlockLocation, EventDay } from '../types';
+import { formatRange, formatDateTime, formatTime } from '../time';
+import type {
+  AssignmentTarget,
+  Block,
+  BlockLocation,
+  EventDay,
+  ShiftMove,
+  ShiftPreview,
+} from '../types';
 
 interface Draft {
   id?: string;
@@ -33,6 +40,287 @@ const emptyDraft = (day: string): Draft => ({
   notes: '',
 });
 
+/**
+ * Bulk time shift — "everything from 3pm moves 20 minutes".
+ *
+ * The whole point is doing under pressure what would otherwise be forty
+ * individual edits, so it is two steps and no more: set the cutoff and the
+ * offset, look at exactly what would move, apply. The list is the confirmation
+ * — there is no second "are you sure", because a dialog that only repeats a
+ * number is a click people learn to make without reading.
+ *
+ * The offset is read off the *plan*, never off the inputs: changing either
+ * field throws the plan away, so what gets applied is always what was on
+ * screen. Same reason the rows carry the `updatedAt` they were previewed at —
+ * the server refuses the batch whole if any of them moved in between.
+ */
+function ShiftCard({
+  day,
+  dayLabel,
+  refreshKey,
+  targetLabel,
+  onApplied,
+  onClose,
+}: {
+  day: string;
+  dayLabel: string;
+  refreshKey: number;
+  targetLabel: (a: Block['appliesTo']) => string;
+  onApplied: () => Promise<void>;
+  onClose: () => void;
+}) {
+  const [fromTime, setFromTime] = useState('15:00');
+  const [minutes, setMinutes] = useState('20');
+  const [direction, setDirection] = useState<'later' | 'earlier'>('later');
+  const [plan, setPlan] = useState<ShiftPreview | null>(null);
+  /** Blocks the admin has unticked — the airport pickup that isn't running late. */
+  const [excluded, setExcluded] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const magnitude = Math.abs(Number(minutes));
+  const signed = direction === 'earlier' ? -magnitude : magnitude;
+  const usable = Number.isInteger(magnitude) && magnitude > 0 && magnitude <= 720 && !!fromTime;
+
+  /** Any change to the inputs invalidates the plan, so the two cannot disagree. */
+  const retype = (fn: () => void) => {
+    setPlan(null);
+    setError(null);
+    fn();
+  };
+
+  const runPreview = async (keepExclusions = false) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api.post<ShiftPreview>('/api/admin/blocks/shift/preview', {
+        day,
+        fromTime,
+        minutes: signed,
+      });
+      setPlan(result);
+      if (!keepExclusions) setExcluded([]);
+    } catch (e) {
+      setPlan(null);
+      setError(e instanceof Error ? e.message : 'Could not work out what would move');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const selected = plan ? plan.moves.filter((m) => !excluded.includes(m.id)) : [];
+
+  const apply = async () => {
+    if (!plan || !selected.length) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.post('/api/admin/blocks/shift', {
+        minutes: plan.minutes,
+        blocks: selected.map((m) => ({ id: m.id, expectedUpdatedAt: m.updatedAt })),
+      });
+      setPlan(null);
+      setExcluded([]);
+      await onApplied();
+      onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not apply the shift');
+      // Nothing was applied, so re-plan against what is there now rather than
+      // leaving times on screen that the refusal has just made stale.
+      if (e instanceof ApiError && e.status === 409) await runPreview(true);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // A different day is a different shift; another admin's edit means re-planning
+  // against what they left behind.
+  useEffect(() => {
+    setPlan(null);
+    setExcluded([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [day]);
+
+  useEffect(() => {
+    if (plan) runPreview(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
+
+  return (
+    <div className="card" style={{ borderColor: 'var(--gold-dim)', marginBottom: 12 }}>
+      <div className="spread">
+        <h3>Shift {dayLabel} times</h3>
+        <button className="btn sm ghost" onClick={onClose}>
+          Close
+        </button>
+      </div>
+      <p className="tiny faint" style={{ marginTop: 4 }}>
+        Moves every {dayLabel} block that <em>starts</em> at or after the cutoff. Anything already
+        under way keeps its time.
+      </p>
+
+      <div className="stack" style={{ marginTop: 10 }}>
+        <div className="field-row">
+          <div className="field">
+            <label htmlFor="shift-from">From</label>
+            <input
+              id="shift-from"
+              type="time"
+              value={fromTime}
+              onChange={(e) => retype(() => setFromTime(e.target.value))}
+            />
+          </div>
+          <div className="field">
+            <label htmlFor="shift-mins">Minutes</label>
+            <div className="row">
+              <input
+                id="shift-mins"
+                type="number"
+                min={1}
+                max={720}
+                value={minutes}
+                onChange={(e) => retype(() => setMinutes(e.target.value))}
+              />
+              <select
+                aria-label="Direction"
+                value={direction}
+                onChange={(e) => retype(() => setDirection(e.target.value as 'later' | 'earlier'))}
+              >
+                <option value="later">later</option>
+                <option value="earlier">earlier</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div className="row">
+          {[10, 15, 20, 30].map((m) => (
+            <button
+              key={m}
+              className="btn sm"
+              onClick={() => retype(() => setMinutes(String(m)))}
+              aria-pressed={magnitude === m}
+            >
+              {m} min
+            </button>
+          ))}
+        </div>
+
+        {error && <div className="banner offline">{error}</div>}
+
+        {!plan && (
+          <button className="btn primary" onClick={() => runPreview()} disabled={busy || !usable}>
+            {busy ? 'Working…' : 'Show what would move'}
+          </button>
+        )}
+      </div>
+
+      {plan && (
+        <>
+          <div className="list-row" style={{ marginTop: 12 }}>
+            <strong>
+              {plan.moves.length} block{plan.moves.length === 1 ? '' : 's'} from{' '}
+              {formatTime(plan.fromTime)}
+            </strong>
+            {plan.moves.length > 0 && (
+              <button
+                className="btn sm ghost"
+                onClick={() =>
+                  setExcluded(excluded.length ? [] : plan.moves.map((m) => m.id))
+                }
+              >
+                {excluded.length ? 'Select all' : 'Select none'}
+              </button>
+            )}
+          </div>
+
+          {plan.moves.length === 0 && (
+            <p className="muted small">
+              {plan.blocked.length
+                ? `Nothing on ${dayLabel} that late can move by this much.`
+                : `Nothing on ${dayLabel} starts that late.`}
+            </p>
+          )}
+
+          {plan.moves.map((m) => (
+            <label className="list-row" key={m.id} style={{ cursor: 'pointer' }}>
+              <span className="row" style={{ minWidth: 0 }}>
+                <input
+                  type="checkbox"
+                  checked={!excluded.includes(m.id)}
+                  onChange={() =>
+                    setExcluded(
+                      excluded.includes(m.id)
+                        ? excluded.filter((id) => id !== m.id)
+                        : [...excluded, m.id]
+                    )
+                  }
+                  style={{ width: 20, height: 20 }}
+                />
+                <span style={{ minWidth: 0 }}>
+                  <span className="label">{m.activity}</span>
+                  <span className="sub" style={{ display: 'block' }}>
+                    {formatRange(m.from.startTime, m.from.endTime)} →{' '}
+                    <strong>{formatRange(m.to!.startTime, m.to!.endTime)}</strong>
+                    {m.to!.day !== m.from.day && ` · moves to ${m.to!.day}`}
+                  </span>
+                  <span className="sub" style={{ display: 'block' }}>
+                    → {targetLabel(m.appliesTo)}
+                  </span>
+                </span>
+              </span>
+            </label>
+          ))}
+
+          {plan.blocked.length > 0 && (
+            <div className="banner info" style={{ marginTop: 12 }} role="alert">
+              <span aria-hidden="true">⚠️</span>
+              <span>
+                <strong>
+                  {plan.blocked.length} block{plan.blocked.length === 1 ? '' : 's'} cannot move by
+                  this much
+                </strong>{' '}
+                and {plan.blocked.length === 1 ? 'is' : 'are'} left out — move{' '}
+                {plan.blocked.length === 1 ? 'it' : 'them'} by hand.
+                <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                  {plan.blocked.map((b) => (
+                    <li key={b.id} className="tiny">
+                      {b.activity} ({formatRange(b.from.startTime, b.from.endTime)}) —{' '}
+                      {reasonFor(b)}
+                    </li>
+                  ))}
+                </ul>
+              </span>
+            </div>
+          )}
+
+          <div className="row" style={{ marginTop: 12 }}>
+            <button className="btn primary" onClick={apply} disabled={busy || !selected.length}>
+              {busy
+                ? 'Moving…'
+                : `Move ${selected.length} block${selected.length === 1 ? '' : 's'} ${
+                    plan.minutes > 0 ? `${plan.minutes} min later` : `${-plan.minutes} min earlier`
+                  }`}
+            </button>
+            <button className="btn ghost" onClick={() => setPlan(null)} disabled={busy}>
+              Change the shift
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function reasonFor(move: ShiftMove): string {
+  if (move.blocked === 'no-day') {
+    return `it would cross midnight ${
+      (move.crosses ?? 1) > 0 ? 'into' : 'back into'
+    } a day the event doesn't have`;
+  }
+  return 'its times are not readable';
+}
+
 /** Last-minute changes without touching the source sheet. */
 export default function SchedulePanel({
   refreshKey,
@@ -53,6 +341,7 @@ export default function SchedulePanel({
   /** A block a delete lost the race to. The edit case is derived — see below. */
   const [staleDeleteId, setStaleDeleteId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
+  const [shifting, setShifting] = useState(false);
 
   const load = async () => {
     const [b, t, r] = await Promise.all([
@@ -91,7 +380,7 @@ export default function SchedulePanel({
 
   const targetLabel = useMemo(() => {
     const map = new Map(targets.map((t) => [`${t.type}:${t.id}`, t.label]));
-    return (b: Block) => map.get(`${b.appliesTo.type}:${b.appliesTo.id}`) ?? '(unassigned)';
+    return (a: Block['appliesTo']) => map.get(`${a.type}:${a.id}`) ?? '(unassigned)';
   }, [targets]);
 
   const visible = useMemo(() => {
@@ -102,7 +391,7 @@ export default function SchedulePanel({
         (b) =>
           !q ||
           b.activity.toLowerCase().includes(q) ||
-          targetLabel(b).toLowerCase().includes(q) ||
+          targetLabel(b.appliesTo).toLowerCase().includes(q) ||
           (b.location?.display ?? '').toLowerCase().includes(q)
       );
   }, [blocks, day, query, targetLabel]);
@@ -255,10 +544,27 @@ export default function SchedulePanel({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
+        <button className="btn" onClick={() => setShifting((s) => !s)} aria-expanded={shifting}>
+          Shift times
+        </button>
         <button className="btn primary" onClick={() => setDraft(emptyDraft(day))}>
           + Add
         </button>
       </div>
+
+      {shifting && (
+        <ShiftCard
+          day={day}
+          dayLabel={days.find((d) => d.key === day)?.label ?? day}
+          refreshKey={refreshKey}
+          targetLabel={targetLabel}
+          onClose={() => setShifting(false)}
+          onApplied={async () => {
+            await load();
+            onChanged();
+          }}
+        />
+      )}
 
       {draft && (
         <div className="card" style={{ borderColor: 'var(--gold-dim)', marginBottom: 12 }}>
@@ -390,7 +696,7 @@ export default function SchedulePanel({
               <div className="sub">
                 {formatRange(b.startTime, b.endTime)} · {b.location?.display ?? 'No location'}
               </div>
-              <div className="sub">→ {targetLabel(b)}</div>
+              <div className="sub">→ {targetLabel(b.appliesTo)}</div>
             </div>
             <div className="row">
               <button className="btn sm" onClick={() => startEdit(b)}>

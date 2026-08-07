@@ -657,3 +657,62 @@ existing because a team was renamed through delete-and-recreate.
 already surfaces those in the panel with a null label and allows revoking them,
 and reissuing for a deleted subject would mint a credential with no schedule
 behind it.
+
+---
+
+## A bulk time shift is previewed, then applied whole
+**Date:** 2026-08-07 · **Status:** decided · **Constrains:** 15, 16, 17
+
+**Question.** Running late is the most common live change at this event —
+"everything from 3pm moves 20 minutes" — and doing it block by block across 8
+teams is forty edits under pressure. What shape should the bulk version take,
+and what happens when part of it can't be applied?
+
+**Decision.** Two steps, like an import: preview what would move, then apply
+the list that was on screen. The preview is the confirmation — there is no
+second "are you sure", because a dialog that only repeats a number is a click
+people learn to make without reading. Every row is unticked-able, so the
+airport pickup that isn't running late stays put. The apply is **all or
+nothing**: any block that has changed since the preview, been deleted, or can't
+move refuses the entire batch, and nothing is written.
+
+**Why all-or-nothing.** A partly applied shift is the worst outcome available
+here. Half a day's schedule 20 minutes from the other half looks exactly like a
+correct schedule — nothing on any screen says which half is which — and the
+people it misleads are on stage. A refusal an admin can read and retry is
+strictly better, and this is the same reasoning as refusing concurrent block
+edits rather than merging them.
+
+**Why the apply takes explicit block ids**, rather than re-deriving them from
+the day and cutoff it was given. Between preview and apply someone else can add
+a block after the cutoff. Re-deriving would sweep it into a change nobody
+reviewed; the id list means the batch is exactly what was approved. Each id
+carries the `updatedAt` it was previewed at, which is item 14's concurrency
+token — required here rather than optional, because every caller of this route
+is a screen someone read a list off.
+
+**The day key moves, the end time doesn't.** A block is a day key plus two
+`HH:MM` strings, and `blockInstants` already reads "end at or before start" as
+"ran past midnight" — Friday 23:30 → Saturday 03:45 is a real call time here.
+So a shift moves the start, carries the block to the adjacent event day if that
+crosses midnight, and shifts the end as a plain clock reading. The past-midnight
+relationship then re-derives itself. Rolling the end forward explicitly as well
+would double-count exactly that case.
+
+**A block with nowhere to land is refused, not guessed.** Crossing midnight into
+a day the event doesn't have would mean writing a time against a day key whose
+date is 24 hours out from what the block now means — which renders as a
+perfectly normal block at the wrong time. It is named in the preview and left
+for a human. The ±12 hour cap on a shift exists for the same reason: it
+guarantees at most one midnight is crossed, so "which day is this now" is one
+step to an adjacent date rather than a search.
+
+**Adjacency is by date, not by `sort_order`.** The next row in the day list is
+not necessarily the next calendar day — a Thursday arrivals day followed by a
+Saturday finals day would otherwise silently move a midnight block a whole day.
+
+**Each moved block still gets its own edit-log line**, with its audience, under
+one summary line for the batch. The summary is what an admin scans for; the
+per-block lines are what "why did my 3pm move" is answered from. The summary is
+derived from what actually moved rather than from what was typed, so it cannot
+describe a shift that didn't happen.

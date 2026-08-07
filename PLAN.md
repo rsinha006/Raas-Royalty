@@ -13,8 +13,8 @@ competition weekend. **Read this at the start of every session.**
 
 ## Where things stand
 
-**Done: Phase A (1–4), Phase B (5–8), and items 9, 11, 13 and 14.** Last updated
-2026-08-07.
+**Done: Phase A (1–4), Phase B (5–8), and items 9, 11, 13, 14 and 15.** Last
+updated 2026-08-07.
 
 - The viewer is **behind access codes**, enforced server-side, with the roster
   no longer enumerable. Codes are managed and exported from the admin panel.
@@ -27,16 +27,19 @@ competition weekend. **Read this at the start of every session.**
 - Each participant's **"Last updated" is their own**, keyed on the same block
   targets that name their socket rooms, and concurrent admin edits are refused
   rather than silently overwriting each other.
-- **144 tests** run under `npm test`, covering authorization negatives, timezone
-  and DST, code management, the schema migration, broadcast scoping, and the
-  item 14 correctness gaps.
+- **Running late is one action**: "everything from 3pm moves 20 minutes",
+  previewed and applied whole rather than forty edits under pressure.
+- **172 tests** run under `npm test`, covering authorization negatives, timezone
+  and DST, code management, the schema migration, broadcast scoping, the item 14
+  correctness gaps, and the bulk shift.
 
 The open decisions are all resolved (see below); item 12 was reshaped by them.
 
 **Not yet true of this project:** no deployment, no real data, and no service
 worker.
 
-**Next up, per the build order: item 10 (service worker), then Phase D.**
+**Next up, per the build order: item 10 (service worker), then the rest of
+Phase D — 16 (view as), 17 (undo), 18 (announcements).**
 
 ### Build order
 
@@ -48,7 +51,7 @@ Everything else proceeds now, in this order:
 2. ~~**Phase B (5–8)** — access codes.~~ Done.
 3. **Items 9, 13, 11, 14, 10** — timezone ✅, the two schema columns ✅, scoped
    broadcasts ✅, correctness gaps ✅, then the service worker.
-4. **Phase D (15–18)** — admin tooling.
+4. **Phase D (15–18)** — admin tooling. Item 15 ✅.
 5. **Item 12 last**, against a frozen template.
 
 Item 12 splits: only the tab readers depend on the template's shape. Diff
@@ -646,10 +649,45 @@ person mid-event is far rarer than two editing the same block.
 Not polish. These are the difference between logistics using the app and routing
 around it.
 
-### 15. `[ ]` Bulk time shift
+### 15. `[x]` Bulk time shift
 
 "Everything after 3pm moves 20 minutes." Running late is *the* most common live
 change; doing it block-by-block across 8 teams is unusable under pressure.
+
+**Done 2026-08-07** — `server/lib/time-shift.js`, two routes on
+`/api/admin/blocks/shift`, a Shift times card in `SchedulePanel`, and 28 new
+tests (`tests/time-shift.test.js`, 172 total). Demonstrated against the seed
+data: 18 blocks previewed from 3pm, one unticked, 17 moved, and a dancer's phone
+showed her performance at 3:25 instead of 3:05 without a reload.
+
+```bash
+npm test
+```
+
+- **Preview then apply, and the apply takes explicit block ids** — not the day
+  and cutoff again. Someone adding a block after the cutoff while you preview
+  must not have it swept into a change nobody reviewed. Each id carries the
+  `updatedAt` it was previewed at, which item 14's guard then enforces —
+  required here rather than optional, since every caller is a screen someone
+  read a list off.
+- **All or nothing.** A stale version, a deleted block, or one that cannot move
+  refuses the whole batch and writes nothing. Half a day 20 minutes from the
+  other half looks exactly like a correct schedule, which is the failure mode
+  this project exists to avoid; a refusal is strictly better.
+- **The day key moves, the end time doesn't.** The start is shifted and carries
+  the block to the adjacent event day if it crosses midnight; the end is shifted
+  as a plain clock reading. `blockInstants` already means "end ≤ start" = "ran
+  past midnight", so that relationship re-derives itself. ⚠️ Rolling the end
+  forward as well would double-count it — there is a test for 23:30–03:45.
+- **Adjacent by date, never by `sort_order`**, and a block with nowhere to land
+  is named in the preview rather than guessed at. The ±12h cap is what
+  guarantees at most one midnight is crossed.
+- Every moved block keeps its own edit-log line and audience, under one summary
+  line derived from what actually moved.
+
+**Not built here:** shifting more than one day at once, and filtering by
+location rather than by ticking rows. Both are speculative until someone has run
+a real day through this.
 
 ### 16. `[ ]` "View as" preview
 
@@ -682,7 +720,7 @@ authorization, negative cases explicit.
   script."*
 - **Done when:** CI runs green and the authorization negatives are covered.
 
-**Partly done already**, as a side effect of items 6–14. 144 tests in `tests/`:
+**Partly done already**, as a side effect of items 6–15. 172 tests in `tests/`:
 
 - ✅ Access-code authorization, negatives explicit (`authorization.test.js`,
   `admin-codes.test.js`) — the done-when above is met on that clause.
@@ -695,6 +733,8 @@ authorization, negative cases explicit.
 - ✅ The item 14 correctness gaps — edit conflicts, orphaned blocks, per-subject
   timestamps, and the placeholder blocks' exclusion from the managed set
   (`correctness.test.js`).
+- ✅ The bulk time shift, including the midnight arithmetic and every way the
+  batch refuses (`time-shift.test.js`).
 - ❌ **Import pipeline** — time parsing across the accepted formats, assignment
   resolution, diff classification. Untouched, and the biggest remaining gap.
 - ❌ **No CI script.** `npm test` is run by hand.
@@ -802,7 +842,7 @@ the two that actually catch problems.
 | ~~T-6 weeks~~ | ~~Phase A.~~ Done — but **real rosters are still not in hand**, and that is a people problem, not an engineering one. Chase it now; it is usually the long pole. |
 | ~~T-5~~ | ~~Phase B (access codes).~~ Done. |
 | T-4 | Phase C (reliability core) — items 9 ✅, 11 ✅, 13 ✅ and 14 ✅ done; 10 remains. |
-| T-3 | Phase D + E (admin tooling, tests, load test). |
+| T-3 | Phase D + E (admin tooling, tests, load test) — item 15 ✅ done early. |
 | T-2 | Phase F + item 21 (deploy, ops, devices). |
 | T-1 | Items 24–26. Dress rehearsal. |
 | Event week | Items 27–28. Freeze Wednesday. |

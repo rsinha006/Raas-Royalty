@@ -21,7 +21,7 @@ otherwise the reasoning is lost between sessions and gets re-litigated.
 npm install && npm run seed && npm run build && npm start   # http://localhost:4000
 npm run dev          # hot reload: client :5173, API :4000
 npm run seed:reset   # rebuild placeholder data from scratch
-npm test             # 144 tests
+npm test             # 172 tests
 npm run codes -- --list   # every live access code and its subject
 ```
 
@@ -37,6 +37,7 @@ React/Vite bundle from `client/dist`. No external services.
 
 - `server/lib/queries.js` — reads, including the personalization logic
 - `server/lib/mutations.js` — writes, all of which log to `edit_log`
+- `server/lib/time-shift.js` — the bulk "everything from 3pm moves 20 min"
 - `server/lib/viewer-auth.js` — code → session, re-checked on every request
 - `server/lib/live.js` — socket rooms, scoped broadcasts, the origin policy
 - `server/lib/event-time.js` — the venue timezone; wall-clock → instant
@@ -89,12 +90,13 @@ Data model and spreadsheet templates are documented in [README.md](README.md).
 
 ## Current state
 
-Phase A (1–4), Phase B (5–8), and items 9, 11, 13 and 14 are done — see
+Phase A (1–4), Phase B (5–8), and items 9, 11, 13, 14 and 15 are done — see
 [PLAN.md](PLAN.md) for what each one settled. In short: the viewer is behind
 access codes enforced server-side, event times are resolved against the venue's
 timezone by the server, changes reach only the people they affect, each person's
 "last updated" is their own, concurrent admin edits are refused rather than
-silently merged, and 144 tests run under `npm test`.
+silently merged, a whole afternoon can be pushed back in one previewed action,
+and 172 tests run under `npm test`.
 
 Still not true: no deployment, no real data, and no service worker.
 

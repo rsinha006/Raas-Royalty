@@ -6,9 +6,10 @@
  * (160 people, 8 teams, ~250 schedule blocks) and exercises all three targeting
  * modes: team, person, and role.
  */
-import { db, newId, nowIso, touchScheduleVersion, setMeta } from './db.js';
+import { db, newId, nowIso, touchRosterVersion, touchScheduleVersion, setMeta } from './db.js';
 import { logEdit } from './lib/mutations.js';
 import { backfillAccessCodes } from './lib/access-codes.js';
+import { backfillTargetVersions } from './migrate.js';
 
 const RESET = process.argv.includes('--reset');
 
@@ -347,6 +348,10 @@ const seed = db.transaction(() => {
     summary: `Seeded placeholder data: ${teams.length} teams, ${Object.values(people).flat().length} people, ${blockCount} schedule blocks`,
   });
 
+  // The blocks above are inserted directly rather than through `createBlock`,
+  // so nothing has stamped their targets. Same backfill the migration runs.
+  backfillTargetVersions(db);
+  touchRosterVersion();
   touchScheduleVersion();
 
   return {

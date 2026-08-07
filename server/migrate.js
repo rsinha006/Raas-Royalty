@@ -1,11 +1,13 @@
 /**
  * Schema migrations for databases that already exist.
  *
- * `schema.sql` is all `CREATE TABLE IF NOT EXISTS`, which is enough to build a
- * fresh database and does nothing at all to a populated one. This file covers
- * the gap: the changes that have to be applied to a database with real rows in
- * it. Everything here is idempotent and runs on every boot, so the deploy step
- * is "restart" rather than "remember to run the migration".
+ * `schema.sql` is all `CREATE TABLE IF NOT EXISTS`, so it does reach an existing
+ * database — a brand-new table can live there and will appear on the next boot.
+ * What it cannot do is change a table that already exists, and it runs first, so
+ * anything depending on a column it does not create would fail. That is the gap
+ * this file covers: new columns, indexes over them, and backfills. Everything
+ * here is idempotent and runs on every boot, so the deploy step is "restart"
+ * rather than "remember to run the migration".
  *
  * Takes `db` as an argument rather than importing it, so that db.js can call it
  * during its own initialization without a circular import.
@@ -82,5 +84,51 @@ export function runMigrations(db) {
     if (!before) applied.push('captain role');
   }
 
+  /**
+   * ---- target_versions — per-target "last updated" ----
+   *
+   * Not reported in `applied`, and not conditional on anything: this is a data
+   * backfill rather than a schema change, and it is the safety net for every
+   * path that writes blocks without going through `createBlock` — the seed, a
+   * future importer, a hand-run SQL fix at 2am during the event. Announcing it
+   * on the boot line would make a routine self-heal look like a migration.
+   */
+  backfillTargetVersions(db);
+
   return applied;
+}
+
+/**
+ * Give every target that already has blocks a baseline timestamp, and write the
+ * epoch that a target with no row falls back to.
+ *
+ * Without this, an upgraded database would show every subject the epoch — a
+ * single timestamp for the whole event, stuck at first boot — instead of when
+ * their own schedule last moved. That is wrong but *visibly* wrong, which is the
+ * deliberate trade in `versionForTargets`: the fallback is a value writes never
+ * move, so a gap reads as stale rather than as a false "just updated".
+ *
+ * Idempotent by construction: it only inserts rows that are missing, so a
+ * target whose real version has since moved on is never dragged backwards.
+ * Exported because the seed has to do the same thing after writing its blocks.
+ */
+export function backfillTargetVersions(db) {
+  // The floor a target with no row reads. Written once and never moved, so a
+  // missed bump surfaces as a stuck timestamp rather than as a false "just
+  // updated" — see `versionForTargets`.
+  db.prepare(
+    `INSERT INTO meta (key, value)
+       SELECT 'target_versions_epoch', ?
+        WHERE NOT EXISTS (SELECT 1 FROM meta WHERE key = 'target_versions_epoch')`
+  ).run(new Date().toISOString());
+
+  db
+    .prepare(
+      `INSERT INTO target_versions (target_type, target_id, updated_at)
+         SELECT applies_to_type, applies_to_id, MAX(updated_at)
+           FROM schedule_blocks
+          GROUP BY applies_to_type, applies_to_id
+       ON CONFLICT(target_type, target_id) DO NOTHING`
+    )
+    .run();
 }

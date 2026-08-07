@@ -52,10 +52,13 @@ function diffBlocks(prev: Block[], next: Block[]): ChangeSet {
 export default function ScheduleScreen({
   onSwitch,
   switchLabel,
+  notice,
   onSessionLost,
 }: {
   onSwitch: () => void;
   switchLabel: string;
+  /** Rendered with the other banners — e.g. a magic link that failed. */
+  notice?: React.ReactNode;
   onSessionLost: () => void;
 }) {
   const [payload, setPayload] = useState<SchedulePayload | null>(null);
@@ -213,6 +216,8 @@ export default function ScheduleScreen({
       </header>
 
       <div className="screen">
+        {notice}
+
         {/* Without this, a rehearsal at a pinned time is indistinguishable from
             the live app — and someone would eventually act on it. */}
         {isRehearsing() && (

@@ -49,8 +49,12 @@ export function setMeta(key, value) {
 }
 
 /**
- * The single timestamp every client displays as "Last updated". Bumped by any
- * write path — manual edit, import, or live sheet sync.
+ * The event-wide timestamp: when anything last changed anywhere. Bumped by
+ * every write path — manual edit, import, or live sheet sync.
+ *
+ * This is the admin panel's "last schedule change" and the socket's greeting.
+ * It is deliberately *not* what a participant sees any more; see
+ * `versionForTargets`.
  */
 export function touchScheduleVersion() {
   const ts = nowIso();
@@ -60,4 +64,60 @@ export function touchScheduleVersion() {
 
 export function scheduleUpdatedAt() {
   return getMeta('schedule_updated_at', nowIso());
+}
+
+/**
+ * Mark these block targets as having just changed.
+ *
+ * Called with the same target list that becomes socket rooms, so "who hears
+ * about this block", "whose schedule contains it" and "whose last-updated moves"
+ * stay one computation rather than three that drift.
+ */
+const bumpTarget = db.prepare(
+  `INSERT INTO target_versions (target_type, target_id, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(target_type, target_id) DO UPDATE SET updated_at = excluded.updated_at`
+);
+
+export function touchTargets(targets, at = nowIso()) {
+  for (const t of targets || []) {
+    if (t && t.type && t.id) bumpTarget.run(t.type, t.id, at);
+  }
+  return at;
+}
+
+/**
+ * Roster-wide changes — a renamed team, a reassigned contact card, a moved
+ * event day — have no block to derive an audience from and can change what any
+ * schedule renders. They raise a floor under everyone's timestamp instead.
+ */
+export function touchRosterVersion() {
+  const ts = nowIso();
+  setMeta('roster_updated_at', ts);
+  return ts;
+}
+
+/**
+ * The "Last updated" one session should see: the newest of its own targets, or
+ * the roster-wide floor if that is later.
+ *
+ * ⚠️ **The last fallback must stay a value that writes do not move.** It used to
+ * be `scheduleUpdatedAt()`, which every write bumps — so a target with no row
+ * did not read as stale, it read as *freshly changed by somebody else's edit*,
+ * which is exactly the ~280-phones bug this whole mechanism exists to kill. A
+ * missed `touchTargets` would have restored the old behaviour for that subject
+ * with no null, no error, and nothing to notice. The epoch is written once and
+ * never again, so the same mistake now shows up as a timestamp stuck in the
+ * past — wrong in a direction someone reports.
+ */
+export function versionForTargets(targets) {
+  const list = (targets || []).filter((t) => t && t.type && t.id);
+  let newest = getMeta('roster_updated_at');
+  if (list.length) {
+    const clause = list.map(() => '(target_type = ? AND target_id = ?)').join(' OR ');
+    const row = db
+      .prepare(`SELECT MAX(updated_at) AS at FROM target_versions WHERE ${clause}`)
+      .get(...list.flatMap((t) => [t.type, t.id]));
+    if (row?.at && (!newest || row.at > newest)) newest = row.at;
+  }
+  return newest || getMeta('target_versions_epoch') || scheduleUpdatedAt();
 }

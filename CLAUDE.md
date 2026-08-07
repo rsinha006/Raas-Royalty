@@ -21,7 +21,7 @@ otherwise the reasoning is lost between sessions and gets re-litigated.
 npm install && npm run seed && npm run build && npm start   # http://localhost:4000
 npm run dev          # hot reload: client :5173, API :4000
 npm run seed:reset   # rebuild placeholder data from scratch
-npm test             # 123 tests
+npm test             # 144 tests
 npm run codes -- --list   # every live access code and its subject
 ```
 
@@ -40,6 +40,7 @@ React/Vite bundle from `client/dist`. No external services.
 - `server/lib/viewer-auth.js` — code → session, re-checked on every request
 - `server/lib/live.js` — socket rooms, scoped broadcasts, the origin policy
 - `server/lib/event-time.js` — the venue timezone; wall-clock → instant
+- `server/db.js` — `target_versions`: per-subject "last updated"
 - `server/sync/` — the import pipeline
 - `client/src/viewer/` — the participant app
 - `client/src/admin/` — the logistics panel
@@ -51,9 +52,13 @@ Five things worth knowing before changing anything:
 marks whether it is reached individually or through a team code. New roles need
 no deploy.
 
-**Schema changes need a migration.** `schema.sql` only builds fresh databases —
-anything an existing one needs goes in `server/migrate.js`, which runs on every
-boot and must stay idempotent.
+**Schema changes need a migration.** Both files run on every boot, and the split
+is by *what* is changing, not by how new the database is. A brand-new table is
+fine in `schema.sql` — `CREATE TABLE IF NOT EXISTS` reaches an existing database
+too (`target_versions` arrived that way). **Anything that touches an existing
+table — a new column, a new index over one, a backfill — goes in
+`server/migrate.js`**, because `schema.sql` runs first and the column may not
+exist yet. Everything in either file must stay idempotent.
 
 **One import pipeline.** `bytes → parseTabular → normalizeScheduleRows →
 computeScheduleDiff → apply`. Manual upload, force re-sync, and background
@@ -72,15 +77,24 @@ symmetry is what keeps "who hears about this block" and "whose schedule contains
 this block" from drifting apart, so keep it. Broadcast payloads carry no
 audience: who is affected is a room, never a field on the wire.
 
+**The same key carries "last updated".** `target_versions` is keyed on that
+identical `type:id` pair, bumped inside `createBlock`/`updateBlock`/`deleteBlock`
+so every write path is covered, and a viewer's `updatedAt` is the newest of their
+own targets — not the event's. A target with no row falls back to the global
+timestamp, which every write bumps, so `backfillTargetVersions()` runs on every
+boot to make sure every target has one. Removing it silently restores the global
+behaviour.
+
 Data model and spreadsheet templates are documented in [README.md](README.md).
 
 ## Current state
 
-Phase A (1–4), Phase B (5–8), and items 9, 11 and 13 are done — see
+Phase A (1–4), Phase B (5–8), and items 9, 11, 13 and 14 are done — see
 [PLAN.md](PLAN.md) for what each one settled. In short: the viewer is behind
 access codes enforced server-side, event times are resolved against the venue's
-timezone by the server, changes reach only the people they affect, and 123 tests
-run under `npm test`.
+timezone by the server, changes reach only the people they affect, each person's
+"last updated" is their own, concurrent admin edits are refused rather than
+silently merged, and 144 tests run under `npm test`.
 
 Still not true: no deployment, no real data, and no service worker.
 

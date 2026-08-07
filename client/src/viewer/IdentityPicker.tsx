@@ -16,10 +16,13 @@ import type { TeamMember } from '../types';
  */
 export default function IdentityPicker({
   teamName,
+  notice,
   onPicked,
   onUseDifferentCode,
 }: {
   teamName: string;
+  /** Rendered above the list — e.g. a magic link that failed while signed in. */
+  notice?: React.ReactNode;
   onPicked: () => void;
   onUseDifferentCode: () => void;
 }) {
@@ -88,6 +91,8 @@ export default function IdentityPicker({
         Which one are you? Some things — airport pickups, captain meetings — are
         scheduled per person.
       </p>
+
+      {notice}
 
       {people.length > 12 && (
         <input

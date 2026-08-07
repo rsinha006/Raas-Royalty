@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api } from '../api';
-import { formatRange } from '../time';
+import { api, ApiError } from '../api';
+import { formatRange, formatDateTime } from '../time';
 import type { AssignmentTarget, Block, BlockLocation, EventDay } from '../types';
 
 interface Draft {
@@ -13,6 +13,13 @@ interface Draft {
   subLocation: string;
   target: string; // "type:id"
   notes: string;
+  /**
+   * The `updatedAt` this draft was opened against. Sent back on save so the
+   * server can refuse to overwrite an edit that landed in between — two
+   * logistics people on the same block is the normal case here, not the
+   * exotic one.
+   */
+  expectedUpdatedAt?: string;
 }
 
 const emptyDraft = (day: string): Draft => ({
@@ -27,7 +34,14 @@ const emptyDraft = (day: string): Draft => ({
 });
 
 /** Last-minute changes without touching the source sheet. */
-export default function SchedulePanel({ onChanged }: { onChanged: () => void }) {
+export default function SchedulePanel({
+  refreshKey,
+  onChanged,
+}: {
+  /** Bumped by a live event from another admin. Reloads without remounting. */
+  refreshKey: number;
+  onChanged: () => void;
+}) {
   const [blocks, setBlocks] = useState<Block[]>([]);
   const [locations, setLocations] = useState<BlockLocation[]>([]);
   const [targets, setTargets] = useState<AssignmentTarget[]>([]);
@@ -36,6 +50,8 @@ export default function SchedulePanel({ onChanged }: { onChanged: () => void }) 
   const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** A block a delete lost the race to. The edit case is derived — see below. */
+  const [staleDeleteId, setStaleDeleteId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
 
   const load = async () => {
@@ -53,7 +69,25 @@ export default function SchedulePanel({ onChanged }: { onChanged: () => void }) 
 
   useEffect(() => {
     load().catch((e) => setError(e.message));
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
+
+  /**
+   * The conflict banner is derived, not stored: it is simply "the open draft's
+   * block, when the freshly-loaded copy no longer matches the version the draft
+   * was opened against". `blocks` is always current — the `refreshKey` effect
+   * reloads on any other admin's change, and both 409 handlers reload too — so
+   * a stored copy would only be a second, staler answer to the same question.
+   *
+   * It also means the banner appears the moment the block moves underneath,
+   * rather than waiting for Save to fail.
+   */
+  const conflict =
+    blocks.find(
+      (b) =>
+        (draft?.id === b.id && draft.expectedUpdatedAt && b.updatedAt !== draft.expectedUpdatedAt) ||
+        b.id === staleDeleteId
+    ) ?? null;
 
   const targetLabel = useMemo(() => {
     const map = new Map(targets.map((t) => [`${t.type}:${t.id}`, t.label]));
@@ -73,7 +107,10 @@ export default function SchedulePanel({ onChanged }: { onChanged: () => void }) 
       );
   }, [blocks, day, query, targetLabel]);
 
-  const startEdit = (b: Block) =>
+  const startEdit = (b: Block) => {
+    // Re-stamping `expectedUpdatedAt` from the current block is what clears the
+    // derived conflict — there is no separate banner state to reset.
+    setStaleDeleteId(null);
     setDraft({
       id: b.id,
       day: b.day,
@@ -84,7 +121,16 @@ export default function SchedulePanel({ onChanged }: { onChanged: () => void }) 
       subLocation: b.location?.subLocation ?? '',
       target: `${b.appliesTo.type}:${b.appliesTo.id}`,
       notes: b.notes ?? '',
+      expectedUpdatedAt: b.updatedAt,
     });
+  };
+
+  /**
+   * A 409 means someone else saved this block first. Reloading is enough to
+   * raise the banner for an edit, because it is derived from `blocks`; a delete
+   * has no draft to derive from, so it names the block explicitly.
+   */
+  const isConflict = (e: unknown) => e instanceof ApiError && e.status === 409;
 
   const save = async () => {
     if (!draft) return;
@@ -102,15 +148,20 @@ export default function SchedulePanel({ onChanged }: { onChanged: () => void }) 
       appliesToType: type,
       appliesToId: id,
       notes: draft.notes.trim() || null,
+      expectedUpdatedAt: draft.expectedUpdatedAt,
     };
     try {
       if (draft.id) await api.patch(`/api/admin/blocks/${draft.id}`, body);
       else await api.post('/api/admin/blocks', body);
       setDraft(null);
+      setStaleDeleteId(null);
       await load();
       onChanged();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Save failed');
+      // The draft stays open and still holds the version it was written
+      // against, so reloading is what makes the banner appear.
+      if (isConflict(e)) await load();
+      else setError(e instanceof Error ? e.message : 'Save failed');
     } finally {
       setBusy(false);
     }
@@ -119,7 +170,18 @@ export default function SchedulePanel({ onChanged }: { onChanged: () => void }) 
   const remove = async (b: Block) => {
     if (!window.confirm(`Delete "${b.activity}" (${b.day} ${b.startTime})? Everyone assigned to it sees this immediately.`))
       return;
-    await api.del(`/api/admin/blocks/${b.id}`);
+    setError(null);
+    try {
+      await api.del(
+        `/api/admin/blocks/${b.id}?expectedUpdatedAt=${encodeURIComponent(b.updatedAt)}`
+      );
+      setStaleDeleteId(null);
+    } catch (e) {
+      if (isConflict(e)) setStaleDeleteId(b.id);
+      else setError(e instanceof Error ? e.message : 'Delete failed');
+      await load();
+      return;
+    }
     await load();
     onChanged();
   };
@@ -136,6 +198,38 @@ export default function SchedulePanel({ onChanged }: { onChanged: () => void }) 
   return (
     <>
       {error && <div className="banner offline" style={{ marginBottom: 12 }}>{error}</div>}
+
+      {conflict && (
+        <div className="banner offline" style={{ marginBottom: 12 }} role="alert">
+          <span aria-hidden="true">⚠️</span>
+          <span>
+            <strong>Someone else changed this block while you had it open.</strong>
+            <br />
+            It now reads <strong>{conflict.activity}</strong>,{' '}
+            {formatRange(conflict.startTime, conflict.endTime)} on {conflict.day}
+            {conflict.location ? ` · ${conflict.location.display}` : ''} (saved{' '}
+            {formatDateTime(conflict.updatedAt)}). Nothing of yours was saved.
+            <br />
+            <button
+              className="btn sm"
+              style={{ marginTop: 8 }}
+              onClick={() => startEdit(conflict)}
+            >
+              Edit the current version
+            </button>{' '}
+            <button
+              className="btn sm ghost"
+              style={{ marginTop: 8 }}
+              onClick={() => {
+                setStaleDeleteId(null);
+                setDraft(null);
+              }}
+            >
+              Discard my change
+            </button>
+          </span>
+        </div>
+      )}
 
       <div className="daytabs">
         {days.map((d) => (

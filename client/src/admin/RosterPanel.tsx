@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { api } from '../api';
+import { api, ApiError } from '../api';
 import type { Contact, Person, Role, Team } from '../types';
 
 interface RosterData {
@@ -11,7 +11,14 @@ interface RosterData {
 
 type Section = 'people' | 'teams' | 'contacts' | 'roles';
 
-export default function RosterPanel({ onChanged }: { onChanged: () => void }) {
+export default function RosterPanel({
+  refreshKey,
+  onChanged,
+}: {
+  /** Bumped by a live event from another admin. Reloads without remounting. */
+  refreshKey: number;
+  onChanged: () => void;
+}) {
   const [data, setData] = useState<RosterData | null>(null);
   const [section, setSection] = useState<Section>('people');
   const [error, setError] = useState<string | null>(null);
@@ -22,7 +29,8 @@ export default function RosterPanel({ onChanged }: { onChanged: () => void }) {
 
   useEffect(() => {
     load().catch((e) => setError(e.message));
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refreshKey]);
 
   const mutate = async (fn: () => Promise<unknown>) => {
     setError(null);
@@ -34,6 +42,32 @@ export default function RosterPanel({ onChanged }: { onChanged: () => void }) {
       setError(e instanceof Error ? e.message : 'That change did not save');
     }
   };
+
+  /**
+   * Deleting someone who still has schedule blocks comes back as a 409 with the
+   * count, rather than quietly leaving blocks pointing at nobody. Ask again
+   * naming the number — it is the fact that decides the answer, and it is only
+   * known at the moment of deletion, not from whatever the page loaded with.
+   */
+  const removeSubject = (path: string, subjectLabel: string) =>
+    mutate(async () => {
+      try {
+        return await api.del(path);
+      } catch (e) {
+        const payload =
+          e instanceof ApiError && e.status === 409
+            ? (e.payload as { blockCount?: number } | null)
+            : null;
+        if (!payload?.blockCount) throw e;
+        const ok = window.confirm(
+          `${subjectLabel} still has ${payload.blockCount} schedule block(s).\n\n` +
+            'Delete those blocks too? Anyone who could see them loses them immediately.\n\n' +
+            'Cancel to keep everything and reassign the blocks first.'
+        );
+        if (!ok) return null;
+        return await api.del(`${path}?removeBlocks=1`);
+      }
+    });
 
   if (!data) return <div className="loading-screen"><span className="spinner" /></div>;
 
@@ -62,8 +96,8 @@ export default function RosterPanel({ onChanged }: { onChanged: () => void }) {
         ))}
       </nav>
 
-      {section === 'people' && <People data={data} mutate={mutate} />}
-      {section === 'teams' && <Teams data={data} mutate={mutate} />}
+      {section === 'people' && <People data={data} mutate={mutate} remove={removeSubject} />}
+      {section === 'teams' && <Teams data={data} mutate={mutate} remove={removeSubject} />}
       {section === 'contacts' && <Contacts data={data} mutate={mutate} />}
       {section === 'roles' && <Roles data={data} mutate={mutate} />}
     </>
@@ -71,6 +105,8 @@ export default function RosterPanel({ onChanged }: { onChanged: () => void }) {
 }
 
 type Mutate = (fn: () => Promise<unknown>) => Promise<void>;
+/** Delete a person or team, re-asking if schedule blocks would be orphaned. */
+type Remove = (path: string, subjectLabel: string) => Promise<void>;
 
 /* ------------------------------ people ------------------------------ */
 
@@ -107,7 +143,7 @@ function RolePicker({
   );
 }
 
-function People({ data, mutate }: { data: RosterData; mutate: Mutate }) {
+function People({ data, mutate, remove }: { data: RosterData; mutate: Mutate; remove: Remove }) {
   const [query, setQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
   const [adding, setAdding] = useState(false);
@@ -212,14 +248,24 @@ function People({ data, mutate }: { data: RosterData; mutate: Mutate }) {
           {data.people.length > 200 ? ' (search to narrow)' : ''}
         </p>
         {filtered.map((p) => (
-          <PersonRow key={p.id} person={p} data={data} mutate={mutate} />
+          <PersonRow key={p.id} person={p} data={data} mutate={mutate} remove={remove} />
         ))}
       </div>
     </>
   );
 }
 
-function PersonRow({ person, data, mutate }: { person: Person; data: RosterData; mutate: Mutate }) {
+function PersonRow({
+  person,
+  data,
+  mutate,
+  remove,
+}: {
+  person: Person;
+  data: RosterData;
+  mutate: Mutate;
+  remove: Remove;
+}) {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState({
     name: person.name,
@@ -246,7 +292,7 @@ function PersonRow({ person, data, mutate }: { person: Person; data: RosterData;
             className="btn sm danger"
             onClick={() => {
               if (window.confirm(`Remove ${person.name} from the roster?`))
-                mutate(() => api.del(`/api/admin/people/${person.id}`));
+                remove(`/api/admin/people/${person.id}`, person.name);
             }}
           >
             Remove
@@ -310,7 +356,7 @@ function PersonRow({ person, data, mutate }: { person: Person; data: RosterData;
 
 /* ------------------------------ teams ------------------------------ */
 
-function Teams({ data, mutate }: { data: RosterData; mutate: Mutate }) {
+function Teams({ data, mutate, remove }: { data: RosterData; mutate: Mutate; remove: Remove }) {
   const [name, setName] = useState('');
 
   return (
@@ -386,7 +432,7 @@ function Teams({ data, mutate }: { data: RosterData; mutate: Mutate }) {
               className="btn sm danger"
               onClick={() => {
                 if (window.confirm(`Delete ${t.name}? Its ${t.memberCount} dancers become unassigned.`))
-                  mutate(() => api.del(`/api/admin/teams/${t.id}`));
+                  remove(`/api/admin/teams/${t.id}`, t.name);
               }}
             >
               Delete

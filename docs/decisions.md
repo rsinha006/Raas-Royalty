@@ -541,3 +541,119 @@ browsers omit the header, for no security gain.
 **At deploy (item 22):** set `PUBLIC_BASE_URL`. It is already needed for the
 access-link export, and it makes the socket policy explicit rather than
 inferred from a proxy's host header.
+
+---
+
+## "Last updated" is per subject, keyed on block targets
+**Date:** 2026-08-07 · **Status:** decided · **Constrains:** 14, 15, 24
+
+**Question.** Every viewer was shown one global `schedule_updated_at`, so an
+edit to any team told all ~280 phones "Last updated a moment ago". Mildly
+alarming and, for 279 of them, false. What should a participant's timestamp
+actually be?
+
+**Decision.** A new `target_versions` table keyed on `(target_type, target_id)`
+— the same `type:id` pair that names a socket room. A session's `updatedAt` is
+the newest of its own `resolveSession(...).targets`, floored by a separate
+`roster_updated_at` for changes that have no audience to derive.
+
+**Why not derive it from `schedule_blocks.updated_at`.** A deletion leaves no
+row behind, and "your 3pm was cancelled" is exactly the change a timestamp has
+to move for. `MAX(updated_at)` over someone's blocks would go *backwards* when a
+block was removed.
+
+**Why the same key as the rooms.** Item 11 established that a room name is a
+block target, so "who hears about this block" and "whose schedule contains it"
+are one computation. This makes "whose last-updated moves" the third face of the
+same thing rather than a fourth notion that drifts. The bumps live in
+`createBlock` / `updateBlock` / `deleteBlock`, so every write path — manual,
+import, background re-sync — is covered without each route remembering.
+
+**⚠️ The fallback has to be a value that writes never move.** The first cut fell
+back to the global `schedule_updated_at`, which every write bumps — so a target
+with no row did not read as stale, it read as *freshly changed by somebody else's
+edit*. That is the original bug, restored through the back door, and a missed
+`touchTargets` would have reproduced it with no null, no error and nothing to
+notice. The fallback is now `target_versions_epoch`, written once at first boot
+and never again, so the same mistake surfaces as a timestamp stuck in the past —
+wrong in a direction somebody reports. Pinned by a test that fails against the
+old fallback.
+
+**`backfillTargetVersions()`** gives every target with blocks a real baseline so
+the epoch is only ever reached by a target that has never had one. It runs on
+every boot and after the seed, and is deliberately not reported as a migration
+because it is a data self-heal, not a schema change.
+
+**What we gave up.** Roster edits still raise a floor under everyone, because a
+renamed team or a reassigned contact card can change what an unrelated schedule
+renders and there is no block to narrow it with. That is the same residual item
+11 recorded for the `roster:updated` broadcast, and it is rare mid-event.
+
+---
+
+## Concurrent block edits are refused, not merged
+**Date:** 2026-08-07 · **Status:** decided · **Constrains:** 14, 15, 17
+
+**Question.** Two logistics people editing the same block was silently
+last-write-wins: the second save overwrote the first with no sign either had
+happened. What should happen instead?
+
+**Decision.** Optimistic concurrency on the block editor. The panel sends the
+`updatedAt` it loaded; a mismatch is a 409 carrying the block as it now stands,
+and the panel shows what it would have overwritten with an explicit choice —
+edit the current version, or discard. Nothing is merged and nothing is
+auto-resolved.
+
+**Why refuse rather than merge.** A field-level merge would produce a block
+nobody typed — one admin's room with another's time — and it is exactly the
+blocks people edit simultaneously that are the ones running late. A wrong time
+on a call sheet is worse than a refusal, which is the whole premise of this
+project.
+
+**Why it is opt-in.** The importer omits the token deliberately: it reconciles
+against a file rather than against a screen someone read, and `source_key`
+already decides what it owns. Bolting the check onto imports would make a
+re-sync fail whenever a manual edit had touched a managed row.
+
+**The client half is the bigger fix.** Both editing panels were keyed on
+`refreshKey`, so *any* live event from another admin remounted them and threw
+away a half-typed block or roster row with no message at all — the concurrent-
+edit problem itself, not a fix for it. `SchedulePanel` and `RosterPanel` now
+take the key as a prop and reload in place. The read-only panels (Overview,
+Codes, Log) stay keyed; they hold nothing anyone typed.
+
+**The conflict banner is derived, not stored.** It is "the open draft's block,
+when the freshly-loaded copy no longer matches the version the draft was opened
+against" — so it appears the moment the block moves underneath rather than
+waiting for Save to fail, and there is no second, staler copy of the block in
+state to keep in sync.
+
+---
+
+## Deleting a subject takes its blocks, after asking
+**Date:** 2026-08-07 · **Status:** decided · **Constrains:** 14, 24
+
+**Question.** Deleting a person or team left their schedule blocks behind
+pointing at an id nothing resolves. What happens to those blocks?
+
+**Decision.** The delete is refused with a 409 naming the count until the caller
+confirms, and then the blocks go in the same transaction — one `deleteBlock` per
+block, so each gets its own edit-log line with an audience. Blocks are removed
+*before* the roster row, so the log can still name the person. The roster
+importer's `removeMissing` path does the same.
+
+**Why refuse first.** Orphaned blocks are invisible to every participant — no
+session has that target — so nothing surfaces them, and they still count in the
+admin totals. But silently deleting schedule data on a roster edit is worse.
+The count comes from the moment of deletion rather than from page load, which
+matters when the panel has been open for an hour.
+
+**A team takes only its own blocks.** Its dancers are unassigned rather than
+deleted (`people.team_id` is `ON DELETE SET NULL`), so their person-targeted
+blocks still resolve and still belong to them — an airport pickup does not stop
+existing because a team was renamed through delete-and-recreate.
+
+**Left alone:** a deleted subject's access code stays live-but-orphaned. Item 8
+already surfaces those in the panel with a null label and allows revoking them,
+and reissuing for a deleted subject would mint a credential with no schedule
+behind it.

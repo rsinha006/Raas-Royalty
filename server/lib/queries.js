@@ -1,4 +1,4 @@
-import { db, getMeta, scheduleUpdatedAt } from '../db.js';
+import { db, getMeta, scheduleUpdatedAt, versionForTargets } from '../db.js';
 import { blockInstants, dayInstants, eventTimeState } from './event-time.js';
 
 /* ------------------------------------------------------------------ *
@@ -367,7 +367,10 @@ export function getPersonalizedSchedule(session) {
     contact: resolved.contact,
     days: listDays(),
     blocks: blocksForTargets(resolved.targets),
-    updatedAt: scheduleUpdatedAt(),
+    // This session's own targets, not the event's. A global timestamp meant a
+    // change to one team told all ~280 phones "Last updated a moment ago" —
+    // alarming, and untrue for all but one of them.
+    updatedAt: versionForTargets(resolved.targets),
     fetchedAt: new Date().toISOString(),
     // The server's own clock, carried on every payload. The client measures its
     // drift from this and counts down from the corrected value, so a phone with

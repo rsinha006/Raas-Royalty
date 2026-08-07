@@ -117,6 +117,24 @@ CREATE TABLE IF NOT EXISTS meta (
   value TEXT
 );
 
+-- When each block target last had something change under it.
+--
+-- "Last updated" used to be one global timestamp, so moving one team's warm-up
+-- told all ~280 phones their schedule had just changed. It hadn't. The row key
+-- is a block target — the same `type:id` pair that names a socket room and the
+-- same list `blocksForTargets` ORs over — so a session's timestamp is the
+-- newest of its own targets and nothing else.
+--
+-- Deliberately not derivable from `schedule_blocks.updated_at`: a deletion
+-- leaves no row behind, and "your 3pm was cancelled" is exactly the change a
+-- timestamp has to move for.
+CREATE TABLE IF NOT EXISTS target_versions (
+  target_type TEXT NOT NULL CHECK (target_type IN ('team', 'person', 'role')),
+  target_id   TEXT NOT NULL,
+  updated_at  TEXT NOT NULL,
+  PRIMARY KEY (target_type, target_id)
+);
+
 -- Access codes are bearer tokens: holding one grants read access to that
 -- subject's schedule and contact details. Stored in plaintext on purpose —
 -- admins have to be able to read them back to distribute them, so hashing at

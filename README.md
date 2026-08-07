@@ -72,6 +72,7 @@ process, one file database, real WebSockets. No external services.
 | `event_days` | Fri/Sat as rows with real dates, so "now / next" knows what's past. |
 | `schedule_blocks` | `applies_to_type` is `team`, `person`, or `role`. |
 | `edit_log` | Every change, with `audience_json` naming who was affected. |
+| `target_versions` | When each block target last changed, keyed on the same `type:id` that names a socket room. This is what a viewer's "Last updated" reads, so one team's edit doesn't tell everyone their schedule moved. |
 
 ### How a block reaches a person
 

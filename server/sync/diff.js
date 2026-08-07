@@ -1,6 +1,13 @@
-import { db, newId, touchScheduleVersion } from '../db.js';
+import { db, newId, touchRosterVersion, touchScheduleVersion } from '../db.js';
 import { describeTarget, listAllBlocks } from '../lib/queries.js';
-import { createBlock, deleteBlock, ensureLocation, logEdit, updateBlock } from '../lib/mutations.js';
+import {
+  createBlock,
+  deleteBlock,
+  deleteBlocksForTarget,
+  ensureLocation,
+  logEdit,
+  updateBlock,
+} from '../lib/mutations.js';
 
 /**
  * Diffing is deliberately separated from applying: the admin preview step runs
@@ -315,6 +322,12 @@ export function applyRosterDiff(diff, ctx) {
       setRoles(item.id, item.row);
     }
     for (const item of diff.deletePeople) {
+      // Their blocks go with them, for the same reason the admin panel's delete
+      // refuses to leave them: a block targeting a person who is no longer on
+      // the roster is invisible to everyone and cleans itself up never. Same
+      // helper as the panel — only the policy differs (it asks first, this
+      // reconciles against a file and does not).
+      deleteBlocksForTarget('person', item.id, { ...ctx, source: ctx.source || 'import' });
       db.prepare('DELETE FROM people WHERE id = ?').run(item.id);
     }
 
@@ -324,6 +337,9 @@ export function applyRosterDiff(diff, ctx) {
       changeType: 'roster',
       summary: `Roster import: ${diff.createPeople.length} people added, ${diff.updatePeople.length} updated, ${diff.deletePeople.length} removed, ${diff.createTeams.length} teams created`,
     });
+    // Roster-wide, like every other roster edit: teams and contact cards moving
+    // can change what any schedule renders.
+    touchRosterVersion();
     return touchScheduleVersion();
   });
   return run();

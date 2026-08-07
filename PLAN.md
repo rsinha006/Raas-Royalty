@@ -13,8 +13,8 @@ competition weekend. **Read this at the start of every session.**
 
 ## Where things stand
 
-**Done: Phase A (1–4), Phase B (5–8), and items 9, 11 and 13.** Last updated
-2026-08-06.
+**Done: Phase A (1–4), Phase B (5–8), and items 9, 11, 13 and 14.** Last updated
+2026-08-07.
 
 - The viewer is **behind access codes**, enforced server-side, with the roster
   no longer enumerable. Codes are managed and exported from the admin panel.
@@ -24,15 +24,19 @@ competition weekend. **Read this at the start of every session.**
   and a **running order** on teams.
 - Changes are **broadcast only to the people they affect**, over a socket whose
   origin is now locked down.
-- **123 tests** run under `npm test`, covering authorization negatives, timezone
-  and DST, code management, the schema migration, and broadcast scoping.
+- Each participant's **"Last updated" is their own**, keyed on the same block
+  targets that name their socket rooms, and concurrent admin edits are refused
+  rather than silently overwriting each other.
+- **144 tests** run under `npm test`, covering authorization negatives, timezone
+  and DST, code management, the schema migration, broadcast scoping, and the
+  item 14 correctness gaps.
 
 The open decisions are all resolved (see below); item 12 was reshaped by them.
 
 **Not yet true of this project:** no deployment, no real data, and no service
 worker.
 
-**Next up, per the build order: items 14, 10.**
+**Next up, per the build order: item 10 (service worker), then Phase D.**
 
 ### Build order
 
@@ -43,7 +47,7 @@ Everything else proceeds now, in this order:
 1. ~~**Item 4** — anonymized fixtures.~~ Done.
 2. ~~**Phase B (5–8)** — access codes.~~ Done.
 3. **Items 9, 13, 11, 14, 10** — timezone ✅, the two schema columns ✅, scoped
-   broadcasts ✅, then correctness gaps, service worker.
+   broadcasts ✅, correctness gaps ✅, then the service worker.
 4. **Phase D (15–18)** — admin tooling.
 5. **Item 12 last**, against a frozen template.
 
@@ -575,21 +579,65 @@ npm test
 after UTD"). The column, the admin editing and the API are done; what a dancer
 or judge *sees* is schedule content, so it belongs with item 24.
 
-### 14. `[ ]` Fix the known correctness gaps
+### 14. `[x]` Fix the known correctness gaps
 
-- Concurrent admin edits are silently last-write-wins.
-- A dead magic link opened while already signed in silently keeps the old
-  session instead of saying the link is revoked (found during item 8).
-- Deleting a person or team orphans their schedule blocks.
-- "Last updated" is global, so everyone sees a fresh timestamp when any team
-  changes — mildly alarming and slightly dishonest.
+- ~~Concurrent admin edits are silently last-write-wins.~~
+- ~~A dead magic link opened while already signed in silently keeps the old
+  session instead of saying the link is revoked (found during item 8).~~
+- ~~Deleting a person or team orphans their schedule blocks.~~
+- ~~"Last updated" is global, so everyone sees a fresh timestamp when any team
+  changes — mildly alarming and slightly dishonest.~~
 - ~~Past-midnight blocks are handled in code but never tested.~~ Closed by item
   9 — they are resolved server-side now, with tests.
-- Placeholder seed blocks aren't in any import's managed set (there's a "clear
-  placeholder blocks" action for this — confirm it's still correct after item 12).
+- ~~Placeholder seed blocks aren't in any import's managed set (there's a "clear
+  placeholder blocks" action for this — confirm it's still correct after item 12).~~
 
-- **Claude Code:** Small and independent — batch into one request, then
-  `/code-review`.
+**Done 2026-08-07** — `target_versions` and the `db.js` helpers around it, an
+optimistic-concurrency guard on block edits, and 20 new tests
+(`tests/correctness.test.js`, 144 total). All five demonstrated in the browser.
+
+```bash
+npm test
+```
+
+- **"Last updated" is now keyed on block targets** — the same `type:id` that
+  names a socket room — so a session's timestamp is the newest of its own
+  targets, not the event's. Demonstrated: another team's block moved and a
+  dancer's timestamp did not budge; his own team's did, live. ⚠️ The trap is the
+  fallback — it must stay a value writes never move. Falling back to the global
+  timestamp (the first cut) means a target with no row reads as *freshly
+  changed*, which is the original bug through the back door. It now falls back to
+  `target_versions_epoch`, written once, so a gap reads as stale instead. There
+  is a test that fails against the old fallback; don't relax it.
+- **Concurrent edits are refused, not merged.** The editor sends the `updatedAt`
+  it loaded; a mismatch is a 409 carrying the current block. Opt-in, so imports
+  are unaffected — they reconcile against a file, not a screen someone read.
+- **The bigger half of that was client-side.** Both editing panels were keyed on
+  `refreshKey`, so *any* live event from another admin remounted them and
+  silently discarded a half-typed block or roster row. `SchedulePanel` and
+  `RosterPanel` now reload in place and keep the draft; the schedule one raises
+  the conflict banner the moment the block moves underneath, before Save rather
+  than after. Not on the list above — found while verifying, and it was the part
+  an admin would actually have hit.
+- **Deleting a person or team is refused with the count** until confirmed, then
+  takes the blocks in the same transaction, one `deleteBlock` each so every
+  removal is logged with an audience. Blocks go before the roster row, so the log
+  can still name the person. A team takes only its own blocks — its dancers are
+  unassigned, not deleted, so their airport pickups survive.
+- **A dead magic link opened while signed in now says so** instead of rendering
+  a working schedule and dropping the reason. Verified at 375×812: a revoked
+  link on a signed-in phone shows the notice and leaves the session alone.
+- **Placeholder blocks are confirmed unmanaged, and the invariant is pinned by a
+  test.** An import owns exactly the rows carrying a `source_key`; seed blocks
+  have none, so `removeMissing` cannot reach them — and neither can it reach
+  manually added blocks, which is the same property and the more important one.
+  If item 12 ever starts writing keyed seed rows, that test is what will say so.
+  The clear action now routes through `deleteBlock` rather than one bulk DELETE.
+
+**Residual:** the concurrency guard covers schedule blocks only. Roster rows
+(people, teams, contacts) have no `updated_at` column and are still
+last-write-wins; adding one is a migration, and two admins editing the same
+person mid-event is far rarer than two editing the same block.
 
 ---
 
@@ -634,7 +682,7 @@ authorization, negative cases explicit.
   script."*
 - **Done when:** CI runs green and the authorization negatives are covered.
 
-**Partly done already**, as a side effect of items 6–13. 93 tests in `tests/`:
+**Partly done already**, as a side effect of items 6–14. 144 tests in `tests/`:
 
 - ✅ Access-code authorization, negatives explicit (`authorization.test.js`,
   `admin-codes.test.js`) — the done-when above is met on that clause.
@@ -644,6 +692,9 @@ authorization, negative cases explicit.
   (`person-roles.test.js`).
 - ✅ Broadcast scoping, the socket origin policy, and the import path's
   audience (`broadcast.test.js`).
+- ✅ The item 14 correctness gaps — edit conflicts, orphaned blocks, per-subject
+  timestamps, and the placeholder blocks' exclusion from the managed set
+  (`correctness.test.js`).
 - ❌ **Import pipeline** — time parsing across the accepted formats, assignment
   resolution, diff classification. Untouched, and the biggest remaining gap.
 - ❌ **No CI script.** `npm test` is run by hand.
@@ -728,6 +779,7 @@ for "I lost my link" at the check-in desk.
 | ~~Access codes look enforced but aren't~~ | Closed — subject derives from the session only, 21 authorization tests | 6 |
 | ~~Socket CORS reflects any origin, and item 11 adds data to broadcasts~~ | Closed — origin is same-origin plus an allow-list, and the audience stays server-side so broadcasts gained no data at all | 11 |
 | Reload while offline shows a browser error | Service worker | 10 |
+| ~~Two admins overwrite each other under pressure~~ | Closed — stale saves are refused with what they would have overwritten, and an open draft survives another admin's edit | 14 |
 | ~~Timezone silently shifts every time shown~~ | Closed — instants resolved server-side, device clock drift corrected, 21 tests | 9 |
 | Real spreadsheet doesn't match the template | Logistics authors in our template; importer validates and rejects loudly | 12 |
 | Template isn't final in time to rehearse against | Track it as a dated dependency, not a background task; T-2 weeks is the drop-dead | 12, 26 |
@@ -749,7 +801,7 @@ the two that actually catch problems.
 | --- | --- |
 | ~~T-6 weeks~~ | ~~Phase A.~~ Done — but **real rosters are still not in hand**, and that is a people problem, not an engineering one. Chase it now; it is usually the long pole. |
 | ~~T-5~~ | ~~Phase B (access codes).~~ Done. |
-| T-4 | Phase C (reliability core) — items 9 ✅, 11 ✅ and 13 ✅ done; 14, 10 remain. |
+| T-4 | Phase C (reliability core) — items 9 ✅, 11 ✅, 13 ✅ and 14 ✅ done; 10 remains. |
 | T-3 | Phase D + E (admin tooling, tests, load test). |
 | T-2 | Phase F + item 21 (deploy, ops, devices). |
 | T-1 | Items 24–26. Dress rehearsal. |

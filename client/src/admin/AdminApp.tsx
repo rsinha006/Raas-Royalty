@@ -117,8 +117,14 @@ export default function AdminApp() {
 
       <div style={{ paddingTop: 14 }}>
         {tab === 'overview' && <Overview key={refreshKey} onGoto={setTab} />}
-        {tab === 'schedule' && <SchedulePanel key={refreshKey} onChanged={refresh} />}
-        {tab === 'roster' && <RosterPanel key={refreshKey} onChanged={refresh} />}
+        {/* The two editing panels are NOT keyed on `refreshKey`. Remounting on
+            every live event throws away whatever the admin was half-way through
+            typing the moment anyone else saves anything — which is the
+            concurrent-edit problem, not a fix for it. They take the key as a
+            prop and reload in place instead. The read-only panels below can
+            keep remounting; they hold nothing anyone typed. */}
+        {tab === 'schedule' && <SchedulePanel refreshKey={refreshKey} onChanged={refresh} />}
+        {tab === 'roster' && <RosterPanel refreshKey={refreshKey} onChanged={refresh} />}
         {tab === 'codes' && <CodesPanel key={refreshKey} />}
         {tab === 'import' && <ImportPanel onChanged={refresh} />}
         {tab === 'log' && <LogPanel key={refreshKey} />}

@@ -1,4 +1,4 @@
-import { db, newId, nowIso, touchScheduleVersion } from '../db.js';
+import { db, newId, nowIso, touchScheduleVersion, touchTargets } from '../db.js';
 import { describeTarget, getBlock } from './queries.js';
 
 /* ------------------------------------------------------------------ *
@@ -122,6 +122,11 @@ export function createBlock(input, ctx) {
     ts
   );
 
+  // Bumped here rather than in the route so that every write path — manual
+  // edit, import, background re-sync — moves the same timestamps without each
+  // one having to remember to.
+  touchTargets([{ type: input.appliesToType, id: input.appliesToId }], ts);
+
   logEdit({
     blockId: id,
     editedBy: ctx.editedBy,
@@ -136,9 +141,23 @@ export function createBlock(input, ctx) {
   return id;
 }
 
-export function updateBlock(id, input, ctx) {
+/**
+ * @param opts.expectedUpdatedAt the `updatedAt` the editor was looking at. When
+ *   supplied and no longer current, nothing is written and `{ conflict: true }`
+ *   comes back with the block as it now stands. Omitted by the importer, which
+ *   is reconciling against a file rather than against a screen someone read.
+ *
+ *   Deliberately its own argument rather than a field on `ctx`: `ctx` is
+ *   provenance (who, from where) and gets built once and spread across a whole
+ *   batch — `applyScheduleDiff` does exactly that. A precondition that belongs
+ *   to one call must not be able to ride along on it.
+ */
+export function updateBlock(id, input, ctx, opts = {}) {
   const before = getBlock(id);
   if (!before) return null;
+  if (opts.expectedUpdatedAt && opts.expectedUpdatedAt !== before.updatedAt) {
+    return { id, conflict: true, current: before };
+  }
 
   const merged = {
     day: input.day ?? before.day,
@@ -179,6 +198,7 @@ export function updateBlock(id, input, ctx) {
 
   if (!changes.length) return { id, changed: false, targets: [] };
 
+  const ts = nowIso();
   db.prepare(
     `UPDATE schedule_blocks
         SET day = ?, start_time = ?, end_time = ?, location_id = ?, activity_label = ?,
@@ -193,8 +213,18 @@ export function updateBlock(id, input, ctx) {
     merged.appliesToType,
     merged.appliesToId,
     merged.notes || null,
-    nowIso(),
+    ts,
     id
+  );
+
+  // Both sides of a reassignment: the team that lost the block has had their
+  // schedule change too, and their "last updated" has to say so.
+  touchTargets(
+    [
+      { type: before.appliesTo.type, id: before.appliesTo.id },
+      { type: merged.appliesToType, id: merged.appliesToId },
+    ],
+    ts
   );
 
   // Both the old and new audience need to know: someone may have lost the block.
@@ -227,11 +257,21 @@ export function updateBlock(id, input, ctx) {
   };
 }
 
-/** Returns the target that lost the block, so the broadcast can reach it. */
-export function deleteBlock(id, ctx) {
+/**
+ * Returns the target that lost the block, so the broadcast can reach it.
+ * Honours `opts.expectedUpdatedAt` the same way `updateBlock` does — deleting a
+ * block someone else has just moved is the more expensive half of the race.
+ */
+export function deleteBlock(id, ctx, opts = {}) {
   const before = getBlock(id);
   if (!before) return null;
+  if (opts.expectedUpdatedAt && opts.expectedUpdatedAt !== before.updatedAt) {
+    return { id, conflict: true, current: before };
+  }
   db.prepare('DELETE FROM schedule_blocks WHERE id = ?').run(id);
+  // The block is gone, so nothing carries its updated_at any more. This row is
+  // the only remaining record that the target's schedule changed at all.
+  touchTargets([{ type: before.appliesTo.type, id: before.appliesTo.id }]);
   logEdit({
     blockId: id,
     editedBy: ctx.editedBy,
@@ -247,6 +287,42 @@ export function deleteBlock(id, ctx) {
     }),
   });
   return { id, target: { type: before.appliesTo.type, id: before.appliesTo.id } };
+}
+
+/**
+ * The ids of every block aimed at one target.
+ *
+ * `applies_to_id` is a polymorphic reference with no foreign key — it points at
+ * teams, people or roles depending on `applies_to_type` — so SQLite cannot
+ * cascade and the rule has to live here. Ids only; `blocksForTargets` in
+ * queries.js is the shaped-rows counterpart for the read path.
+ */
+export function blockIdsForTarget(type, id) {
+  return db
+    .prepare('SELECT id FROM schedule_blocks WHERE applies_to_type = ? AND applies_to_id = ?')
+    .all(type, id)
+    .map((b) => b.id);
+}
+
+/**
+ * Remove every block aimed at a target that is going away, one `deleteBlock` at
+ * a time so each gets its own edit-log line with an audience — "why did my
+ * airport pickup vanish" has to stay answerable afterwards.
+ *
+ * One rule, one home. The admin panel refuses until an admin confirms and the
+ * roster importer removes silently, but *what* deleting a subject does to its
+ * blocks is the same in both, and it was written twice before this.
+ *
+ * Call before deleting the subject row: the log summaries read the subject's
+ * name, and afterwards there would only be an id to report.
+ */
+export function deleteBlocksForTarget(type, id, ctx) {
+  const targets = [];
+  for (const blockId of blockIdsForTarget(type, id)) {
+    const removed = deleteBlock(blockId, ctx);
+    if (removed) targets.push(removed.target);
+  }
+  return targets;
 }
 
 /**

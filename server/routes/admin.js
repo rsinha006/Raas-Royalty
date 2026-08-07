@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import express from 'express';
 import multer from 'multer';
 
-import { db, newId, touchScheduleVersion, getMeta } from '../db.js';
+import { db, newId, touchScheduleVersion, touchRosterVersion, getMeta } from '../db.js';
 import {
   checkPassword,
   clearSession,
@@ -25,7 +25,15 @@ import {
   listRoles,
   listTeams,
 } from '../lib/queries.js';
-import { createBlock, deleteBlock, ensureLocation, logEdit, updateBlock } from '../lib/mutations.js';
+import {
+  blockIdsForTarget,
+  createBlock,
+  deleteBlock,
+  deleteBlocksForTarget,
+  ensureLocation,
+  logEdit,
+  updateBlock,
+} from '../lib/mutations.js';
 import { ingest, pullAndSync, syncStatus } from '../sync/index.js';
 import { parseTabular } from '../sync/parse.js';
 import {
@@ -167,9 +175,14 @@ export function adminRouter({ broadcast }) {
    * `refreshRooms` is the other half — moving a dancer between teams changes
    * which rooms their already-open socket belongs in, and without this they
    * would keep hearing their old team's changes until they reloaded.
+   *
+   * `touchRosterVersion` is the "last updated" counterpart: with no block to
+   * derive an audience from, a roster edit raises the floor under everyone's
+   * timestamp rather than any one target's.
    */
   const rosterChanged = (req, summary) => {
     logEdit({ editedBy: editorName(req), source: 'admin', changeType: 'roster', summary });
+    touchRosterVersion();
     const ts = touchScheduleVersion();
     broadcast('roster:updated', { updatedAt: ts }, { refreshRooms: true });
     return ts;
@@ -259,18 +272,49 @@ export function adminRouter({ broadcast }) {
     res.json({ ok: true });
   });
 
+  /**
+   * Deleting a subject used to leave its blocks behind, pointing at an id
+   * nothing resolves. Those blocks are invisible to every participant — no
+   * session has that target — but they still count in the admin totals, still
+   * render as "Unknown person (per_xyz)", and would still be there at 1pm
+   * Saturday when someone is trying to work out why the numbers don't add up.
+   *
+   * So the delete is refused, with the count, until the caller says what to do
+   * about them. The count comes from the moment of deletion rather than from a
+   * page load, which matters when the panel has been open for an hour.
+   */
+  const blocksPending = (subjectLabel, count) => ({
+    error: `${subjectLabel} still has ${count} schedule block(s) assigned. Deleting leaves them pointing at nobody.`,
+    reason: 'has-blocks',
+    blockCount: count,
+  });
+
+  const confirmedCascade = (req) => req.query.removeBlocks === '1';
+
   router.delete('/people/:id', (req, res) => {
     const prev = db.prepare('SELECT * FROM people WHERE id = ?').get(req.params.id);
     if (!prev) return res.status(404).json({ error: 'Not found' });
-    const orphaned = db
-      .prepare("SELECT COUNT(*) AS n FROM schedule_blocks WHERE applies_to_type = 'person' AND applies_to_id = ?")
-      .get(req.params.id).n;
-    db.prepare('DELETE FROM people WHERE id = ?').run(req.params.id);
+
+    const blockIds = blockIdsForTarget('person', req.params.id);
+    if (blockIds.length && !confirmedCascade(req)) {
+      return res.status(409).json(blocksPending(prev.name, blockIds.length));
+    }
+
+    db.transaction(() => {
+      deleteBlocksForTarget('person', req.params.id, {
+        editedBy: editorName(req),
+        source: 'admin',
+      });
+      db.prepare('DELETE FROM people WHERE id = ?').run(req.params.id);
+    })();
+
+    // One broadcast, not two: `rosterChanged` already wakes every client and
+    // re-derives socket rooms, which a deleted person needs anyway.
     rosterChanged(
       req,
-      `Removed ${prev.name} from the roster${orphaned ? ` (${orphaned} schedule block(s) still reference them)` : ''}`
+      `Removed ${prev.name} from the roster${blockIds.length ? ` and their ${blockIds.length} schedule block(s)` : ''}`
     );
-    res.json({ ok: true, orphanedBlocks: orphaned });
+    res.json({ ok: true, removedBlocks: blockIds.length });
   });
 
   router.post('/teams', (req, res) => {
@@ -337,9 +381,31 @@ export function adminRouter({ broadcast }) {
     const prev = db.prepare('SELECT * FROM teams WHERE id = ?').get(req.params.id);
     if (!prev) return res.status(404).json({ error: 'Not found' });
     const members = db.prepare('SELECT COUNT(*) AS n FROM people WHERE team_id = ?').get(req.params.id).n;
-    db.prepare('DELETE FROM teams WHERE id = ?').run(req.params.id);
-    rosterChanged(req, `Deleted team ${prev.name}${members ? ` (${members} dancers unassigned)` : ''}`);
-    res.json({ ok: true, unassigned: members });
+
+    /**
+     * Only the team's own blocks. Its dancers are unassigned rather than
+     * deleted (`people.team_id` is ON DELETE SET NULL), so their
+     * person-targeted blocks still resolve and still belong to them — an
+     * airport pickup does not stop existing because the team was renamed
+     * through a delete-and-recreate.
+     */
+    const blockIds = blockIdsForTarget('team', req.params.id);
+    if (blockIds.length && !confirmedCascade(req)) {
+      return res.status(409).json(blocksPending(prev.name, blockIds.length));
+    }
+
+    db.transaction(() => {
+      deleteBlocksForTarget('team', req.params.id, { editedBy: editorName(req), source: 'admin' });
+      db.prepare('DELETE FROM teams WHERE id = ?').run(req.params.id);
+    })();
+
+    rosterChanged(
+      req,
+      `Deleted team ${prev.name}${members ? ` (${members} dancers unassigned)` : ''}${
+        blockIds.length ? ` and its ${blockIds.length} schedule block(s)` : ''
+      }`
+    );
+    res.json({ ok: true, unassigned: members, removedBlocks: blockIds.length });
   });
 
   router.post('/contacts', (req, res) => {
@@ -470,17 +536,40 @@ export function adminRouter({ broadcast }) {
     res.json({ ok: true, id, updatedAt });
   });
 
+  /**
+   * Two admins editing the same block used to be silently last-write-wins: the
+   * second save overwrote the first with no sign either had happened, and the
+   * only trace was two edit-log lines nobody was reading at the time.
+   *
+   * The editor sends the `updatedAt` it loaded; a mismatch means the block moved
+   * under it. 409 with the block as it now stands, so the panel can say what it
+   * would have overwritten rather than just refusing.
+   *
+   * Deliberately not applied to imports — those reconcile against a file, not
+   * against a screen someone read, and `sourceKey` already decides what they own.
+   */
+  const conflict = (res, current) =>
+    res.status(409).json({
+      error: 'Someone else changed this block while you had it open.',
+      reason: 'conflict',
+      current,
+    });
+
   router.patch('/blocks/:id', (req, res) => {
     const b = req.body || {};
     const patch = { ...b };
+    delete patch.expectedUpdatedAt; // a concurrency token, not a block field
     if (b.venue !== undefined || b.subLocation !== undefined) {
       patch.locationId = ensureLocation(b.venue, b.subLocation);
     }
-    const result = updateBlock(req.params.id, patch, {
-      editedBy: editorName(req),
-      source: 'manual',
-    });
+    const result = updateBlock(
+      req.params.id,
+      patch,
+      { editedBy: editorName(req), source: 'manual' },
+      { expectedUpdatedAt: b.expectedUpdatedAt || null }
+    );
     if (!result) return res.status(404).json({ error: 'Not found' });
+    if (result.conflict) return conflict(res, result.current);
     const updatedAt = result.changed
       ? scheduleChanged({ changedBlockIds: [req.params.id] }, result.targets)
       : undefined;
@@ -488,8 +577,15 @@ export function adminRouter({ broadcast }) {
   });
 
   router.delete('/blocks/:id', (req, res) => {
-    const removed = deleteBlock(req.params.id, { editedBy: editorName(req), source: 'manual' });
+    const removed = deleteBlock(
+      req.params.id,
+      { editedBy: editorName(req), source: 'manual' },
+      // On the query string because DELETE request bodies are not reliably
+      // sent by intermediaries.
+      { expectedUpdatedAt: req.query.expectedUpdatedAt || null }
+    );
     if (!removed) return res.status(404).json({ error: 'Not found' });
+    if (removed.conflict) return conflict(res, removed.current);
     const updatedAt = scheduleChanged({ removedBlockIds: [req.params.id] }, [removed.target]);
     res.json({ ok: true, updatedAt });
   });
@@ -561,19 +657,43 @@ export function adminRouter({ broadcast }) {
    * Placeholder blocks aren't part of any import's managed set, so a first real
    * import would sit alongside them rather than replace them. This clears them
    * in one step once the real schedule has landed.
+   *
+   * Why they are unmanaged, and why that is correct: an import owns exactly the
+   * blocks carrying a `source_key`, and `computeScheduleDiff` starts from
+   * `listAllBlocks().filter(b => b.sourceKey)`. Seed blocks are written with a
+   * null key, so they are invisible to the diff — including to `removeMissing`,
+   * which is the point. An import that adopted them would be an import that can
+   * silently delete anything an admin added by hand, since manual blocks have no
+   * key either. Pinned by a test; if item 12 ever starts writing keyed seed
+   * rows, that test is what will say so.
    */
   router.delete('/seed-data', (req, res) => {
-    const rows = db.prepare("SELECT COUNT(*) AS n FROM schedule_blocks WHERE source = 'seed'").get().n;
-    if (!rows) return res.json({ ok: true, removed: 0 });
-    db.prepare("DELETE FROM schedule_blocks WHERE source = 'seed'").run();
+    const seeded = db.prepare("SELECT id FROM schedule_blocks WHERE source = 'seed'").all();
+    if (!seeded.length) return res.json({ ok: true, removed: 0 });
+
+    // Through `deleteBlock` rather than one DELETE statement, so each removal
+    // lands in the edit log with its audience and moves its target's timestamp.
+    // Clearing ~250 placeholder blocks is otherwise a single unattributable
+    // line saying everyone's schedule emptied. ~18ms at 110 blocks, and this
+    // runs once, before real data lands.
+    const targets = db.transaction(() =>
+      seeded
+        .map((b) => deleteBlock(b.id, { editedBy: editorName(req), source: 'admin' }))
+        .filter(Boolean)
+        .map((removed) => removed.target)
+    )();
+
     logEdit({
       editedBy: editorName(req),
       source: 'admin',
       changeType: 'deleted',
-      summary: `Cleared ${rows} placeholder schedule block(s)`,
+      summary: `Cleared ${seeded.length} placeholder schedule block(s)`,
     });
-    const updatedAt = scheduleChanged();
-    res.json({ ok: true, removed: rows, updatedAt });
+    // A count, not the ids: no client reads the id list, and shipping ~250 of
+    // them to every affected socket is pure weight ahead of the refetch that
+    // actually carries the change.
+    const updatedAt = scheduleChanged({ removedCount: seeded.length }, targets);
+    res.json({ ok: true, removed: seeded.length, updatedAt });
   });
 
   /* ---- Roster import: same two-step shape ---- */

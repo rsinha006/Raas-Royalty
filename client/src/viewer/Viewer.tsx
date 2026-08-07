@@ -12,6 +12,7 @@ import {
 import type { Bootstrap, SignInReason, ViewerSession } from '../types';
 import CodeEntry from './CodeEntry';
 import IdentityPicker from './IdentityPicker';
+import LinkNotice from './LinkNotice';
 import ScheduleScreen from './ScheduleScreen';
 
 /**
@@ -45,12 +46,32 @@ export default function Viewer() {
   const [phase, setPhase] = useState<Phase>('checking');
   const [session, setSession] = useState<ViewerSession | null>(null);
   const [reason, setReason] = useState<SignInReason | null>(null);
+  /**
+   * A failed magic link opened by someone who is *already* signed in.
+   *
+   * The redirect sets `?signin=revoked`, but the old cookie is still good, so
+   * the session check succeeds and the schedule renders — leaving the person
+   * looking at a working screen with no idea the link they just tapped is dead.
+   * At a check-in desk that reads as "the app is fine", and the captain holding
+   * the replaced link never gets told. Held separately from `reason` because it
+   * annotates a session rather than explaining the absence of one.
+   */
+  const [deadLink, setDeadLink] = useState<SignInReason | null>(null);
   const [busy, setBusy] = useState(false);
   const [eventName, setEventName] = useState('Royalty');
 
+  /**
+   * The URL's reason, kept where `checkSession` can consume it. State alone
+   * won't do: `checkSession` is a `useCallback` that must not re-create itself
+   * when the reason changes, so it would close over a stale value.
+   */
+  const pendingReason = useRef<SignInReason | null>(null);
+
   useEffect(() => {
     purgeLegacyKeys();
-    setReason(takeSignInReasonFromUrl());
+    const fromUrl = takeSignInReasonFromUrl();
+    pendingReason.current = fromUrl;
+    setReason(fromUrl);
   }, []);
 
   // The event name is all an unauthenticated visitor is told, and it is only
@@ -86,11 +107,21 @@ export default function Viewer() {
 
   const checkSession = useCallback(async () => {
     try {
-      applySession(await api.get<ViewerSession>('/api/session'));
+      const next = await api.get<ViewerSession>('/api/session');
+      // The session survived a link that didn't. Don't drop the reason on the
+      // floor — the old cookie working is exactly what hides the dead link.
+      if (pendingReason.current) {
+        setDeadLink(pendingReason.current);
+        pendingReason.current = null;
+      }
+      applySession(next);
       setReason(null);
     } catch (err) {
       if (err instanceof ApiError) {
         // A real 401: the cookie is missing, expired, or its code was revoked.
+        // The link's own reason is the better explanation, and `reason` already
+        // holds it — this only fills in when there wasn't one.
+        pendingReason.current = null;
         setPhase('signed-out');
         setReason((prev) => prev ?? (hasBeenSeen() ? 'expired' : null));
         return;
@@ -139,6 +170,7 @@ export default function Viewer() {
     forgetEverything();
     setSession(null);
     setReason(null);
+    setDeadLink(null);
     setPhase('signed-out');
     // Drop the socket's rooms too — the cookie it handshook with is gone.
     socketIdentity.current = null;
@@ -170,10 +202,19 @@ export default function Viewer() {
     );
   }
 
+  const notice = deadLink ? (
+    <LinkNotice
+      reason={deadLink}
+      subjectName={session?.subject?.name ?? null}
+      onDismiss={() => setDeadLink(null)}
+    />
+  ) : null;
+
   if (phase === 'identify') {
     return (
       <IdentityPicker
         teamName={session?.subject?.name ?? 'Your team'}
+        notice={notice}
         onPicked={checkSession}
         onUseDifferentCode={signOut}
       />
@@ -185,6 +226,7 @@ export default function Viewer() {
       // A team member can step back to the name list; everyone else signs out.
       onSwitch={session?.subjectType === 'team' ? changePerson : signOut}
       switchLabel={session?.subjectType === 'team' ? 'Not you?' : 'Sign out'}
+      notice={notice}
       onSessionLost={() => {
         // A 401 means we reached the server and it refused us — the code was
         // revoked, or the session ran out. Being offline does not land here.

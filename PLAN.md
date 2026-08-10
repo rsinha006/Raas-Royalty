@@ -13,8 +13,8 @@ competition weekend. **Read this at the start of every session.**
 
 ## Where things stand
 
-**Done: Phase A (1–4), Phase B (5–8), and items 9, 11, 13, 14 and 15.** Last
-updated 2026-08-07.
+**Done: Phase A (1–4), Phase B (5–8), and items 9, 10, 11, 13, 14 and 15.** Last
+updated 2026-08-10.
 
 - The viewer is **behind access codes**, enforced server-side, with the roster
   no longer enumerable. Codes are managed and exported from the admin panel.
@@ -29,17 +29,19 @@ updated 2026-08-07.
   rather than silently overwriting each other.
 - **Running late is one action**: "everything from 3pm moves 20 minutes",
   previewed and applied whole rather than forty edits under pressure.
-- **172 tests** run under `npm test`, covering authorization negatives, timezone
+- **A reload with no signal still works** — a service worker holds the app
+  shell, so the offline schedule cache survives the refresh people reach for
+  when a screen looks stale.
+- **198 tests** run under `npm test`, covering authorization negatives, timezone
   and DST, code management, the schema migration, broadcast scoping, the item 14
-  correctness gaps, and the bulk shift.
+  correctness gaps, the bulk shift, and the offline shell.
 
 The open decisions are all resolved (see below); item 12 was reshaped by them.
 
-**Not yet true of this project:** no deployment, no real data, and no service
-worker.
+**Not yet true of this project:** no deployment and no real data.
 
-**Next up, per the build order: item 10 (service worker), then the rest of
-Phase D — 16 (view as), 17 (undo), 18 (announcements).**
+**Next up, per the build order: the rest of Phase D — 16 (view as), 17 (undo),
+18 (announcements) — then Phase E.**
 
 ### Build order
 
@@ -49,9 +51,9 @@ Everything else proceeds now, in this order:
 
 1. ~~**Item 4** — anonymized fixtures.~~ Done.
 2. ~~**Phase B (5–8)** — access codes.~~ Done.
-3. **Items 9, 13, 11, 14, 10** — timezone ✅, the two schema columns ✅, scoped
-   broadcasts ✅, correctness gaps ✅, then the service worker.
-4. **Phase D (15–18)** — admin tooling. Item 15 ✅.
+3. ~~**Items 9, 13, 11, 14, 10**~~ — timezone ✅, the two schema columns ✅,
+   scoped broadcasts ✅, correctness gaps ✅, service worker ✅. Done.
+4. **Phase D (15–18)** — admin tooling. Item 15 ✅; 16–18 remain.
 5. **Item 12 last**, against a frozen template.
 
 Item 12 splits: only the tab readers depend on the template's shape. Diff
@@ -446,14 +448,54 @@ the entire bug.
 Also fixed a stale README line claiming the viewer has no login (untrue since
 item 6), and added `EVENT_TIMEZONE` and `PUBLIC_BASE_URL` to `.env.example`.
 
-### 10. `[ ]` Add a service worker for the offline app shell
+### 10. `[x]` Add a service worker for the offline app shell
 
 The cache only works if the page is *already loaded*. A pull-to-refresh with no
 signal currently gives a browser error — and refreshing is exactly what people
 do when something looks stale.
 
-- **Claude Code:** Have it verify by killing the server and reloading, not by
-  reading the code.
+**Done 2026-08-10** — `client/sw.js`, `client/vite-plugin-sw.js`,
+`client/src/register-sw.ts`, and 26 new tests (`tests/service-worker.test.js`,
+198 total). Verified by killing the server, not by reading the code: a full
+reload with the process dead rendered the judge's three Saturday blocks behind
+the "Offline · last known" banner.
+
+```bash
+npm test
+```
+
+- **The worker caches the shell and nothing else** — the HTML and the one
+  JS/CSS pair the build emits. ⚠️ `/api/*` and `/socket.io/*` are not
+  intercepted *at all*, and that is the whole point: the app already has a
+  schedule cache that renders behind an offline banner with its capture time,
+  whereas a cached `/api/schedule` would come back through `api.get()` as an
+  ordinary 200 and render as live. Same class of bug as the timezone one item 9
+  removed. There is a test per API path asserting `respondWith` is never called.
+- **Navigations are network-first**, which is the opposite of the usual recipe
+  and deliberate: cache-first would leave a phone that installed on Friday
+  serving Friday's HTML and Friday's asset hashes through every refresh, so an
+  emergency fix would reach nobody who had already opened the app. Demonstrated
+  by rebuilding with a changed bundle and reloading — new cache, old one
+  deleted, new bundle loaded. The 3.5s timeout is for venue wifi that is
+  associated but not passing packets, where the request hangs rather than fails.
+- **`/s/:code` offline gets a written page, not the shell.** Not politeness — a
+  loop: `App.tsx` sends any `/s/` path back to the server with
+  `location.replace`, so answering it from cache is an infinite redirect on a
+  phone with no signal. The page links to the saved schedule instead.
+- **`/admin` offline says so** rather than rendering a panel that cannot save.
+- **A captive portal never becomes the app.** Venue and hotel wifi answer every
+  request with 200 and their own sign-in page; caching that as the shell would
+  hand every later offline reload a wifi login screen, and it would stay until
+  the next successful load. `response.redirected` catches it, with a test.
+- The manifest comes from the real bundle at build time, so the build id changes
+  when and only when the shell's contents do — a byte-identical `sw.js` is
+  ignored by the browser and nothing would update. `sw.js` is served with
+  `Cache-Control: no-cache` for the same reason.
+
+**Residual:** an open page is not told a new build exists; it picks one up on
+the next reload. Fine under item 27's freeze, and an update prompt is a
+notification nobody at a competition will read. Also no offline *write* queue —
+the viewer is read-only, so there is nothing to queue.
 
 ### 11. `[x]` Scope broadcasts to the affected audience
 
@@ -720,7 +762,7 @@ authorization, negative cases explicit.
   script."*
 - **Done when:** CI runs green and the authorization negatives are covered.
 
-**Partly done already**, as a side effect of items 6–15. 172 tests in `tests/`:
+**Partly done already**, as a side effect of items 6–15. 198 tests in `tests/`:
 
 - ✅ Access-code authorization, negatives explicit (`authorization.test.js`,
   `admin-codes.test.js`) — the done-when above is met on that clause.
@@ -735,6 +777,8 @@ authorization, negative cases explicit.
   (`correctness.test.js`).
 - ✅ The bulk time shift, including the midnight arithmetic and every way the
   batch refuses (`time-shift.test.js`).
+- ✅ The offline shell, run as the real generated worker inside a fake
+  `ServiceWorkerGlobalScope` (`service-worker.test.js`).
 - ❌ **Import pipeline** — time parsing across the accepted formats, assignment
   resolution, diff classification. Untouched, and the biggest remaining gap.
 - ❌ **No CI script.** `npm test` is run by hand.
@@ -818,7 +862,7 @@ for "I lost my link" at the check-in desk.
 | --- | --- | --- |
 | ~~Access codes look enforced but aren't~~ | Closed — subject derives from the session only, 21 authorization tests | 6 |
 | ~~Socket CORS reflects any origin, and item 11 adds data to broadcasts~~ | Closed — origin is same-origin plus an allow-list, and the audience stays server-side so broadcasts gained no data at all | 11 |
-| Reload while offline shows a browser error | Service worker | 10 |
+| ~~Reload while offline shows a browser error~~ | Closed — the shell is precached and served when the network fails, verified with the server killed | 10 |
 | ~~Two admins overwrite each other under pressure~~ | Closed — stale saves are refused with what they would have overwritten, and an open draft survives another admin's edit | 14 |
 | ~~Timezone silently shifts every time shown~~ | Closed — instants resolved server-side, device clock drift corrected, 21 tests | 9 |
 | Real spreadsheet doesn't match the template | Logistics authors in our template; importer validates and rejects loudly | 12 |
@@ -841,7 +885,7 @@ the two that actually catch problems.
 | --- | --- |
 | ~~T-6 weeks~~ | ~~Phase A.~~ Done — but **real rosters are still not in hand**, and that is a people problem, not an engineering one. Chase it now; it is usually the long pole. |
 | ~~T-5~~ | ~~Phase B (access codes).~~ Done. |
-| T-4 | Phase C (reliability core) — items 9 ✅, 11 ✅, 13 ✅ and 14 ✅ done; 10 remains. |
+| T-4 | Phase C (reliability core) — items 9 ✅, 10 ✅, 11 ✅, 13 ✅ and 14 ✅ done; only item 12 remains, and it waits on the template. |
 | T-3 | Phase D + E (admin tooling, tests, load test) — item 15 ✅ done early. |
 | T-2 | Phase F + item 21 (deploy, ops, devices). |
 | T-1 | Items 24–26. Dress rehearsal. |

@@ -175,6 +175,25 @@ of [time]" banner rather than an error, and recovers on its own when the
 connection returns. A dropped socket triggers a real fetch before anything is
 declared offline, so a brief blip doesn't flash the banner.
 
+A service worker (`client/sw.js`, emitted to the build root by
+`client/vite-plugin-sw.js`) keeps that cache reachable across a reload, which is
+otherwise the one gesture that throws it away. It caches the app shell — the
+HTML and the JS/CSS pair the build emits, listed from the real bundle — and
+nothing else:
+
+| Request | Behaviour |
+| --- | --- |
+| `/api/*`, `/socket.io/*` | Never intercepted. The schedule cache above is the offline story, and it renders behind its own banner. |
+| `/s/:code` | Network only. Offline it explains that signing in needs a connection and links to the saved schedule. |
+| `/admin` | Network only. Offline it says so rather than rendering a panel that cannot save. |
+| Navigations | Network first, cached shell after 3.5s or on failure — so a reload with signal always gets the current build. |
+| Hashed assets | Cache first, and only ever what the build declared. |
+
+Registration is production-only and skipped on `/admin`; a dev build unregisters
+any worker it finds, so a stale bundle cannot outlive an edit. The server sends
+`sw.js` with `Cache-Control: no-cache` so a redeploy is picked up on the next
+load rather than up to an hour later.
+
 ## Notifications (not in v1)
 
 The groundwork is in place: every `edit_log` row carries `audience_json` with the

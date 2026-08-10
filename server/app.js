@@ -55,10 +55,34 @@ export function createApp({ broadcast = () => {}, serveClient = true } = {}) {
   if (!serveClient) return app;
 
   if (fs.existsSync(CLIENT_DIST)) {
-    app.use(express.static(CLIENT_DIST, { index: false, maxAge: '1h' }));
+    app.use(
+      express.static(CLIENT_DIST, {
+        index: false,
+        maxAge: '1h',
+        setHeaders(res, filePath) {
+          /**
+           * The service worker must revalidate on every check. Under the hour
+           * that every other asset gets, a phone could keep serving a worker
+           * an hour after an emergency fix was deployed — and the worker is the
+           * thing that decides which build the phone loads. `no-cache` still
+           * 304s off the ETag, so the cost is one conditional request.
+           */
+          if (path.basename(filePath) === 'sw.js') {
+            res.setHeader('Cache-Control', 'no-cache');
+          }
+        },
+      })
+    );
     // SPA fallback — /admin, /s/:code and any deep link render the same bundle.
     app.get('*', (req, res, next) => {
       if (req.path.startsWith('/api')) return next();
+      /**
+       * Never answer /sw.js with the HTML shell. If the build predates the
+       * worker, the honest answer is 404 — registration fails and the app runs
+       * exactly as it did before. Serving index.html instead would register a
+       * worker whose script is a web page, which fails in a much stranger way.
+       */
+      if (req.path === '/sw.js') return res.status(404).type('text/plain').send('Not found');
       res.sendFile(path.join(CLIENT_DIST, 'index.html'));
     });
   } else {

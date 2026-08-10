@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import { initClock } from './clock';
+import { registerServiceWorker } from './register-sw';
 import './styles.css';
 
 const root = createRoot(document.getElementById('root')!);
@@ -20,3 +21,10 @@ const render = () =>
  * for long or at all when offline: `initClock` resolves either way.
  */
 initClock().finally(render);
+
+/**
+ * After the first render is scheduled, never before it: the offline shell is
+ * what makes the *next* load work, and nothing about installing it should
+ * delay the schedule someone is standing there waiting for.
+ */
+registerServiceWorker();

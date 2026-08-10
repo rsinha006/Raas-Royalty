@@ -21,7 +21,7 @@ otherwise the reasoning is lost between sessions and gets re-litigated.
 npm install && npm run seed && npm run build && npm start   # http://localhost:4000
 npm run dev          # hot reload: client :5173, API :4000
 npm run seed:reset   # rebuild placeholder data from scratch
-npm test             # 172 tests
+npm test             # 198 tests
 npm run codes -- --list   # every live access code and its subject
 ```
 
@@ -43,10 +43,11 @@ React/Vite bundle from `client/dist`. No external services.
 - `server/lib/event-time.js` — the venue timezone; wall-clock → instant
 - `server/db.js` — `target_versions`: per-subject "last updated"
 - `server/sync/` — the import pipeline
+- `client/sw.js` — the offline shell, emitted by `client/vite-plugin-sw.js`
 - `client/src/viewer/` — the participant app
 - `client/src/admin/` — the logistics panel
 
-Five things worth knowing before changing anything:
+Six things worth knowing before changing anything:
 
 **Roles are data, not an enum, and a person holds a set of them.** Roles live in
 `person_roles`; captains hold `Dancer` + `Captain`. A role row's `selector`
@@ -86,19 +87,29 @@ timestamp, which every write bumps, so `backfillTargetVersions()` runs on every
 boot to make sure every target has one. Removing it silently restores the global
 behaviour.
 
+**The service worker caches the shell, never data.** `/api/*` and `/socket.io/*`
+are not intercepted at all — no `respondWith`, so there is no path by which a
+cached schedule reaches the app. The offline story is the `localStorage` cache in
+`session.ts`, which the viewer renders behind an "Offline · last known" banner;
+a service-worker copy would come back as an ordinary 200 and render as live.
+Navigations are network-first so a redeploy reaches phones that already
+installed; `/s/:code` is network-only because serving it the shell is an
+infinite redirect. Tests cover each of these — don't relax them.
+
 Data model and spreadsheet templates are documented in [README.md](README.md).
 
 ## Current state
 
-Phase A (1–4), Phase B (5–8), and items 9, 11, 13, 14 and 15 are done — see
+Phase A (1–4), Phase B (5–8), and items 9, 10, 11, 13, 14 and 15 are done — see
 [PLAN.md](PLAN.md) for what each one settled. In short: the viewer is behind
 access codes enforced server-side, event times are resolved against the venue's
 timezone by the server, changes reach only the people they affect, each person's
 "last updated" is their own, concurrent admin edits are refused rather than
 silently merged, a whole afternoon can be pushed back in one previewed action,
-and 172 tests run under `npm test`.
+a reload with no signal still shows the last known schedule, and 198 tests run
+under `npm test`.
 
-Still not true: no deployment, no real data, and no service worker.
+Still not true: no deployment and no real data.
 
 The design decisions that were blocking are settled in
 [docs/decisions.md](docs/decisions.md) — read it before changing the data model,

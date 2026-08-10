@@ -716,3 +716,57 @@ one summary line for the batch. The summary is what an admin scans for; the
 per-block lines are what "why did my 3pm move" is answered from. The summary is
 derived from what actually moved rather than from what was typed, so it cannot
 describe a shift that didn't happen.
+
+---
+
+## The service worker caches the shell and nothing else
+**Date:** 2026-08-10 · **Status:** decided
+
+**Question.** How much should the offline service worker cache? The obvious
+answer is "the app and its data", and there are well-worn recipes for caching
+API responses with a stale-while-revalidate strategy.
+
+**Decision.** The worker caches the app shell only — the HTML and the JS/CSS
+pair the build emits, listed from the real bundle by `client/vite-plugin-sw.js`.
+`/api/*` and `/socket.io/*` are not intercepted at all: no `respondWith`, no
+code path in which a cached response reaches the app. `/s/:code` and `/admin`
+are network-only with written offline pages. Navigations are network-first with
+a 3.5s timeout; hashed assets are cache-first and nothing is stored at runtime
+except the shell HTML.
+
+**Why.** The app already has a schedule cache, in `localStorage`, and the thing
+that makes it safe is that the viewer *knows* it is a cache: it renders behind
+an "Offline · last known 5:13 AM" banner with the timestamp it was captured at.
+A cached `/api/schedule` in the service worker would come back through
+`api.get()` as an ordinary 200 and render as live. That is the same class of
+bug as the timezone one item 9 removed — a plausible, confident, wrong answer —
+and it would appear precisely when someone is checking whether their call time
+moved. Caching only the shell means the worker cannot produce a wrong schedule,
+because it never holds one.
+
+Three consequences worth keeping:
+
+**Nothing personal is ever written to the cache.** The shell is byte-identical
+for all ~280 people. The Cache Storage API outlives the session cookie and is
+shared by everyone who uses that phone, so a redeemed `/s/:code` response or a
+schedule payload sitting in it would undo what item 6 closed. Runtime caching is
+restricted to the shell HTML for this reason rather than as an optimization.
+
+**Navigations are network-first, not cache-first.** Cache-first is the
+conventional choice and it is wrong here: a phone that installed the worker on
+Friday would serve Friday's HTML — and therefore Friday's asset hashes —
+through every refresh, so an emergency fix during the event would reach nobody
+who had already opened the app. The timeout exists for venue wifi that is
+associated but not moving packets, where the request hangs rather than failing.
+
+**`/s/:code` cannot fall back to the shell**, and the reason is mechanical
+rather than a judgement call. `App.tsx` sends any `/s/` path back to the server
+with `location.replace`, because the server handles redemption. Answering that
+navigation from the cache is an infinite redirect on a phone with no signal.
+
+**Rejected:** `vite-plugin-pwa` / Workbox. It is the standard answer and it
+would have worked, but it brings a build-time dependency and a generated worker
+whose behaviour lives in its configuration — and the whole decision above is
+about what the worker refuses to do. Sixty lines of routing that can be read,
+and tested against a fake `ServiceWorkerGlobalScope`, is the better trade at
+this size.

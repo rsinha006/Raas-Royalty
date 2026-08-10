@@ -246,6 +246,23 @@ export function listTeamMembers(teamId) {
  * ------------------------------------------------------------------ */
 
 /**
+ * The event-wide announcement target — item 18.
+ *
+ * "Fire alarm, evacuate" used to mean creating six near-identical blocks, one
+ * per audience, each with its own edit-log line and its own chance of being
+ * missed. This is one block that every session's target list contains.
+ *
+ * The id is pinned rather than passed, so there is exactly one announcement
+ * room (`everyone:all`), one `target_versions` key, and no way for two callers
+ * to invent different sentinels. The database enforces it too.
+ *
+ * ⚠️ A block *target*, never a session subject and never an access-code
+ * subject. Nobody signs in "as everyone"; every session already includes this
+ * in its targets, which is what makes one block reach all ~280 people.
+ */
+export const EVERYONE = Object.freeze({ type: 'everyone', id: 'all' });
+
+/**
  * Resolve a session (a role + a team or a person) into the set of block targets
  * that session should see, plus the contact card to surface.
  *
@@ -270,6 +287,7 @@ export function resolveSession({ type, id }) {
       .get();
     const targets = [{ type: 'team', id: team.id }];
     if (dancerRole) targets.push({ type: 'role', id: dancerRole.id });
+    targets.push({ ...EVERYONE });
     return {
       kind: 'team',
       subject: { id: team.id, name: team.name, kind: 'team' },
@@ -303,6 +321,7 @@ export function resolveSession({ type, id }) {
       ...roles.map((r) => ({ type: 'role', id: r.id })),
     ];
     if (person.team_id) targets.push({ type: 'team', id: person.team_id });
+    targets.push({ ...EVERYONE });
 
     // Their own contact card, else their team liaison, else the event-wide fallback.
     const contactId =
@@ -334,7 +353,7 @@ export function resolveSession({ type, id }) {
       kind: 'role',
       subject: { id: role.id, name: role.label, kind: 'role', roleLabel: role.label },
       roleId: role.id,
-      targets: [{ type: 'role', id: role.id }],
+      targets: [{ type: 'role', id: role.id }, { ...EVERYONE }],
       contact: shapeContact(
         db.prepare('SELECT * FROM contact_cards WHERE id = ?').get(getMeta('default_contact_id'))
       ),
@@ -416,6 +435,7 @@ export function listEditLog({ limit = 200 } = {}) {
  * Human label for a target, used in edit summaries and the admin block list.
  */
 export function describeTarget(type, id) {
+  if (type === 'everyone') return 'Everyone';
   if (type === 'team') {
     const t = db.prepare('SELECT name FROM teams WHERE id = ?').get(id);
     return t ? t.name : `Unknown team (${id})`;

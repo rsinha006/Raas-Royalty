@@ -70,13 +70,13 @@ process, one file database, real WebSockets. No external services.
 | `contact_cards` | Name, title, phone, email, note. |
 | `locations` | `venue_name` + `sub_location` ("Main Venue → Green Room B"). |
 | `event_days` | Fri/Sat as rows with real dates, so "now / next" knows what's past. |
-| `schedule_blocks` | `applies_to_type` is `team`, `person`, or `role`. |
+| `schedule_blocks` | `applies_to_type` is `team`, `person`, `role`, or `everyone`. |
 | `edit_log` | Every change, with `audience_json` naming who was affected. |
 | `target_versions` | When each block target last changed, keyed on the same `type:id` that names a socket room. This is what a viewer's "Last updated" reads, so one team's edit doesn't tell everyone their schedule moved. |
 
 ### How a block reaches a person
 
-A block targets a team, a single person, or a whole role.
+A block targets a team, a single person, a whole role, or **everyone**.
 
 - A **team session** — a team code, before the "which dancer are you?" step —
   sees its team's blocks plus the dancer role's blocks. Not Captain: there is no
@@ -84,6 +84,15 @@ A block targets a team, a single person, or a whole role.
 - A **person session** sees their own blocks, the blocks of *every* role they
   hold, and their team's blocks if they have a team. This is what carries the
   captain-only blocks to a captain and to nobody else.
+- **Every** session also sees blocks targeting `everyone`. That is the
+  event-wide announcement — "fire alarm, evacuate" as one block instead of six,
+  reaching all ~280 people and marked *Everyone* on their screen. Pick it from
+  the top of the **Assigned to** list, or write `Everyone` in the spreadsheet's
+  assignment column.
+
+`everyone` is a block target and nothing else: nobody signs in as everyone, and
+no access code exists for it. Its id is always `all`, enforced by the schema as
+well as in code, so there is exactly one announcement audience.
 
 ## "I don't see my warm-up"
 

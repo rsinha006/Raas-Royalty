@@ -1,5 +1,10 @@
 export type Selector = 'team' | 'person';
-export type TargetType = 'team' | 'person' | 'role';
+/**
+ * `everyone` is a block target only — the event-wide announcement audience.
+ * It is never a session subject and never an access-code subject, so
+ * `Subject.kind` and the code types below stay three-way.
+ */
+export type TargetType = 'team' | 'person' | 'role' | 'everyone';
 
 export interface Role {
   id: string;

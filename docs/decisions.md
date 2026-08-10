@@ -873,3 +873,56 @@ mechanism.
 `updated_at`, so there is no version to check a restore against — item 14's
 residual, unchanged. A roster edit shows in the log with the reason it cannot be
 reversed rather than with a button that would race.
+
+---
+
+## An announcement is a block targeting `everyone`
+**Date:** 2026-08-10 · **Status:** decided · supersedes the deferral in
+"Block targeting is three-way"
+
+**Question.** "Fire alarm, evacuate" meant creating six near-identical blocks.
+The 2026-08-04 targeting decision considered a global broadcast and deferred it
+to item 18. Do we add it, and as what?
+
+**Decision.** Yes. `applies_to_type` gains a fourth value, `everyone`, with the
+id pinned to `all`. Every session's `targets` list contains it, so one block
+reaches all ~280 people. There is no announcements table and no separate
+concept: an announcement is a schedule block, and inherits the whole machine.
+
+**Why.** The thing logistics already does under pressure is create blocks. The
+fix is to let them create *one*, not to teach them a second mechanism at 1pm on
+a Saturday. Making it a target rather than a new entity means it arrives with
+everything already built: it appears in the right place in the day, it reaches
+the right socket rooms, it moves the right "last updated", it shows up in "view
+as", it can be bulk-shifted, and it can be undone — all of which would have been
+separate work against a parallel announcements table, and several of which would
+have been forgotten.
+
+`live.js` already said "adding a fourth targeting mode would need no change
+here", and that turned out to be true: rooms are derived from targets.
+
+Three things this pins down:
+
+**One audience, enforced twice.** The id is normalized in the mutations and
+constrained in the schema (`applies_to_type <> 'everyone' OR applies_to_id =
+'all'`). A second sentinel would mean a second socket room and a second
+`target_versions` key that nobody's session reads — a block that looks posted
+and reaches nobody. The DB constraint is the one that survives a hand-run SQL
+fix at 2am.
+
+**A target, never a subject.** `everyone` is not a session subject and not an
+access-code subject: nobody signs in as everyone, and no credential exists for
+it. Those tables' three-way CHECKs are unchanged on purpose, and there are tests
+holding that line, because the natural drift is for a fourth target type to leak
+into three-way lists that mean something else.
+
+**It moves everyone's "last updated", and that is correct.** Item 14 made the
+timestamp per-subject precisely so one team's edit did not tell 280 people their
+day had changed. An announcement is the one change for which telling all 280 is
+true.
+
+**Cost, accepted:** SQLite cannot widen a CHECK constraint, so `schedule_blocks`
+and `target_versions` are rebuilt in `migrate.js` — create, copy, drop, rename,
+re-index. Verified against the real 110-block dev database: every row, version
+and index survived. The alternative was dropping the constraints, which would
+have traded a one-time migration for a permanently weaker invariant.

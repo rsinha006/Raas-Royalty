@@ -48,6 +48,39 @@ legacy.exec(`
   );
   CREATE INDEX idx_people_role ON people(role_id);
 
+  -- Blocks and target versions as they shipped before item 18: a three-way
+  -- CHECK that SQLite cannot widen in place, so migrate.js rebuilds both.
+  CREATE TABLE event_days (
+    key TEXT PRIMARY KEY, label TEXT NOT NULL, date TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0
+  );
+  CREATE TABLE locations (
+    id TEXT PRIMARY KEY, venue_name TEXT NOT NULL, sub_location TEXT
+  );
+  CREATE TABLE schedule_blocks (
+    id TEXT PRIMARY KEY,
+    day TEXT NOT NULL REFERENCES event_days(key),
+    start_time TEXT NOT NULL, end_time TEXT NOT NULL,
+    location_id TEXT REFERENCES locations(id) ON DELETE SET NULL,
+    activity_label TEXT NOT NULL,
+    applies_to_type TEXT NOT NULL CHECK (applies_to_type IN ('team', 'person', 'role')),
+    applies_to_id TEXT NOT NULL,
+    notes TEXT,
+    source TEXT NOT NULL DEFAULT 'manual',
+    source_key TEXT,
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL, last_change TEXT
+  );
+  CREATE INDEX idx_blocks_day ON schedule_blocks(day, start_time);
+  CREATE INDEX idx_blocks_target ON schedule_blocks(applies_to_type, applies_to_id);
+  CREATE UNIQUE INDEX idx_blocks_source_key
+    ON schedule_blocks(source_key) WHERE source_key IS NOT NULL;
+  CREATE TABLE target_versions (
+    target_type TEXT NOT NULL CHECK (target_type IN ('team', 'person', 'role')),
+    target_id TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (target_type, target_id)
+  );
+
   -- The edit log as it shipped before item 17: prose, and nothing to reverse
   -- it with. The four columns undo needs are added by migrate.js.
   CREATE TABLE edit_log (
@@ -66,6 +99,16 @@ legacy.exec(`
     ('p_amir','Amir Alpha','dancer','team_a'),
     ('p_bianca','Bianca Beta','dancer','team_b'),
     ('p_judge','Jordan Judge','judge',NULL);
+  -- Friday, because the suite's own seedBlocks() adds Saturday later.
+  INSERT INTO event_days (key,label,date,sort_order) VALUES ('Fri','Friday','2026-08-07',1);
+  INSERT INTO locations (id,venue_name,sub_location) VALUES ('loc_1','Main Venue','Main Stage');
+  INSERT INTO schedule_blocks
+    (id,day,start_time,end_time,location_id,activity_label,applies_to_type,applies_to_id,
+     notes,source,source_key,created_at,updated_at)
+  VALUES ('blk_1','Fri','09:00','10:00','loc_1','Legacy Beta block','team','team_b',
+          'Bring shoes','manual','sheet-row-1','2026-08-01T12:00:00.000Z','2026-08-01T12:00:00.000Z');
+  INSERT INTO target_versions (target_type,target_id,updated_at)
+    VALUES ('team','team_b','2026-08-01T12:00:00.000Z');
   INSERT INTO edit_log (id,schedule_block_id,edited_by,source,timestamp,change_type,change_summary)
     VALUES
       ('log_1','blk_1','Marcus','manual','2026-08-01T12:00:00.000Z','updated','Changed something'),
@@ -234,6 +277,45 @@ describe('migrating a database that already has a roster', () => {
     assert.equal(legacyRows.length, 2);
     assert.equal(legacyRows[0].change_summary, 'Changed something');
     assert.equal(legacyRows[0].before_json, null);
+  });
+
+  /**
+   * Item 18 widened a CHECK constraint, which SQLite cannot do in place — so
+   * migrate.js rebuilds both tables. The risk of a rebuild is losing or
+   * reordering something, so this asserts the row came through whole.
+   */
+  test('the everyone target is accepted, and the rebuilt tables kept their rows', () => {
+    const block = db.prepare('SELECT * FROM schedule_blocks WHERE id = ?').get('blk_1');
+    assert.equal(block.activity_label, 'Legacy Beta block');
+    assert.equal(block.notes, 'Bring shoes');
+    assert.equal(block.location_id, 'loc_1');
+    assert.equal(block.source_key, 'sheet-row-1');
+    assert.equal(block.applies_to_type, 'team');
+
+    // The indexes came back with it — losing the unique one would let an import
+    // create a duplicate of a row it already owns.
+    const indexes = db.prepare('PRAGMA index_list(schedule_blocks)').all().map((i) => i.name);
+    assert.ok(indexes.includes('idx_blocks_source_key'));
+    assert.ok(indexes.includes('idx_blocks_target'));
+
+    assert.equal(
+      db.prepare("SELECT updated_at FROM target_versions WHERE target_type='team' AND target_id='team_b'").get()
+        .updated_at,
+      '2026-08-01T12:00:00.000Z'
+    );
+
+    // And the point of the whole rebuild: an announcement now inserts.
+    db.prepare(
+      `INSERT INTO schedule_blocks
+         (id,day,start_time,end_time,activity_label,applies_to_type,applies_to_id,
+          source,created_at,updated_at)
+       VALUES ('blk_all','Fri','13:00','13:15','Fire alarm','everyone','all','manual',?,?)`
+    ).run('2026-08-01T12:00:00.000Z', '2026-08-01T12:00:00.000Z');
+    assert.equal(
+      db.prepare('SELECT applies_to_id FROM schedule_blocks WHERE id = ?').get('blk_all').applies_to_id,
+      'all'
+    );
+    db.prepare("DELETE FROM schedule_blocks WHERE id = 'blk_all'").run();
   });
 
   test('rows written before batching get their own batch, and are not undoable', async () => {

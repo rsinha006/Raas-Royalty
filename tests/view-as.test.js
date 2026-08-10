@@ -260,6 +260,8 @@ describe('why these blocks', () => {
       { type: 'role', id: 'dancer', label: 'All Dancer' },
       { type: 'role', id: 'captain', label: 'All Captain' },
       { type: 'team', id: 'team_a', label: 'Alpha Crew' },
+      // Every view holds the announcement target — item 18.
+      { type: 'everyone', id: 'all', label: 'Everyone' },
     ]);
   });
 
@@ -272,7 +274,7 @@ describe('why these blocks', () => {
 
     assert.ok(!activities(nina.body.schedule).includes('Captains meeting'));
     assert.ok(!held.includes('role:captain'));
-    assert.deepEqual(held, ['person:p_nina', 'role:dancer', 'team:team_a']);
+    assert.deepEqual(held, ['person:p_nina', 'role:dancer', 'team:team_a', 'everyone:all']);
   });
 });
 

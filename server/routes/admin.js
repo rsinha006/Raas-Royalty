@@ -999,6 +999,8 @@ export function adminRouter({ broadcast }) {
   /** Convenience for the manual editor: every possible assignment target. */
   router.get('/targets', (req, res) => {
     const targets = [
+      // First, because an announcement is the one target chosen under pressure.
+      { type: 'everyone', id: 'all', label: 'Everyone at the event', group: 'Everyone' },
       ...listRoles().map((r) => ({ type: 'role', id: r.id, label: `All ${r.label}`, group: 'Roles' })),
       ...listTeams().map((t) => ({ type: 'team', id: t.id, label: t.name, group: 'Teams' })),
       ...listPeople().map((p) => ({

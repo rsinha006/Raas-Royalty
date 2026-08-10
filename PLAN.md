@@ -13,8 +13,8 @@ competition weekend. **Read this at the start of every session.**
 
 ## Where things stand
 
-**Done: Phase A (1–4), Phase B (5–8), and items 9, 10, 11, 13, 14, 15, 16 and
-17.** Last updated 2026-08-10.
+**Done: Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13
+and 14.** Last updated 2026-08-10.
 
 - The viewer is **behind access codes**, enforced server-side, with the roster
   no longer enumerable. Codes are managed and exported from the admin panel.
@@ -37,16 +37,19 @@ competition weekend. **Read this at the start of every session.**
   reaches them and how they sign in.
 - **A change can be put back** — one admin action is one entry in the log, and
   undo reverts all of it or refuses and writes nothing.
-- **236 tests** run under `npm test`, covering authorization negatives, timezone
+- **"Fire alarm, evacuate" is one block**, targeting everyone, reaching every
+  session and every socket.
+- **256 tests** run under `npm test`, covering authorization negatives, timezone
   and DST, code management, the schema migrations, broadcast scoping, the item 14
-  correctness gaps, the bulk shift, the offline shell, preview fidelity, and
-  everything undo refuses.
+  correctness gaps, the bulk shift, the offline shell, preview fidelity,
+  everything undo refuses, and the announcement target.
 
 The open decisions are all resolved (see below); item 12 was reshaped by them.
 
 **Not yet true of this project:** no deployment and no real data.
 
-**Next up: item 18 (announcements), which closes Phase D — then Phase E.**
+**Next up: Phase E — item 19 (the import-pipeline tests and a CI script), then
+20 (load test) and 21 (devices and accessibility).**
 
 ### Build order
 
@@ -58,7 +61,7 @@ Everything else proceeds now, in this order:
 2. ~~**Phase B (5–8)** — access codes.~~ Done.
 3. ~~**Items 9, 13, 11, 14, 10**~~ — timezone ✅, the two schema columns ✅,
    scoped broadcasts ✅, correctness gaps ✅, service worker ✅. Done.
-4. **Phase D (15–18)** — admin tooling. Items 15 ✅, 16 ✅ and 17 ✅; 18 remains.
+4. ~~**Phase D (15–18)** — admin tooling.~~ Done.
 5. **Item 12 last**, against a frozen template.
 
 Item 12 splits: only the tab readers depend on the template's shape. Diff
@@ -96,6 +99,7 @@ Summary, with the item each one now constrains:
 | Schedule source of truth | Logistics fills `templates/royalty-schedule-template.xlsx`; the app imports it. Admin panel is source of truth for live changes only. | 12, 24 |
 | Event timezone | Server-authoritative. `America/Indiana/Indianapolis` (Bloomington, IN) — IANA name, never a fixed offset. | 9, 24 |
 | Headcount | Size for 280, load test at 600. | 20, 25 |
+| Event-wide announcements | **Yes** (2026-08-10) — a fourth block target, `everyone`, rather than a separate concept. | 18 |
 
 One value is still pending but not blocking, because it is data rather than
 design: the real **event dates**. Not locked as of 2026-08-05 — the 2026-08-07 in
@@ -115,7 +119,7 @@ in the direction of less work:
 
 ---
 
-## Access-code design (not yet built)
+## Access-code design (built — items 5–8)
 
 Reverses the original "one shared link, no passwords" concept. Gains privacy,
 costs lost-code support at check-in.
@@ -825,10 +829,52 @@ npm test
 **Not built here:** undoing roster edits. People, teams and contacts still have
 no `updated_at` to check a restore against — item 14's residual, unchanged.
 
-### 18. `[ ]` Event-wide announcements
+### 18. `[x]` Event-wide announcements
 
 Only if item 3 says you want them. Today "fire alarm, evacuate" means creating
 six near-identical blocks.
+
+**Decided 2026-08-10 — yes**, reversing the deferral in item 3's targeting
+decision. **Done the same day** — a fourth `applies_to_type`, the CHECK widened
+in `server/migrate.js`, and 20 new tests (`tests/announcements.test.js` plus one
+in `broadcast.test.js` and one in `person-roles.test.js`, 256 total).
+Demonstrated end to end on the real dev database: a fire-alarm block posted from
+the panel reached a team code, a dancer and a staff member, rendered with an
+"Everyone" badge on a judge's phone, and was then undone.
+
+```bash
+npm test
+```
+
+- **An announcement is a schedule block, not a new concept.** Making it a target
+  means it arrives with everything already built — the right place in the day,
+  the right socket rooms, the right "last updated", view-as, bulk shift, undo.
+  A parallel announcements table would have meant redoing all of that, and
+  forgetting several. `live.js` already claimed a fourth targeting mode would
+  need no change there; it didn't.
+- ⚠️ **One audience, enforced twice** — normalized in the mutations *and*
+  constrained in the schema. A second sentinel would be a second socket room and
+  a second `target_versions` key nobody reads: a block that looks posted and
+  reaches nobody. The constraint is what survives a hand-run SQL fix at 2am.
+- ⚠️ **`everyone` is a block target, never a session subject and never a code
+  subject.** The three-way CHECKs on `access_codes` and the view-as route are
+  unchanged on purpose, with tests holding the line — the natural drift is for a
+  fourth target type to leak into three-way lists that mean something else.
+- **It moves everyone's "last updated", and that is the one time that's
+  honest.** Item 14 made the timestamp per-subject so one team's edit didn't
+  alarm 280 people; an announcement really does affect all of them.
+- **SQLite cannot widen a CHECK**, so `schedule_blocks` and `target_versions`
+  are rebuilt — create, copy, drop, rename, re-index, guarded on the stored DDL
+  so it runs once. Verified against the real 110-block database: 110 blocks, 172
+  versions and all three indexes came through.
+- The importer accepts `Everyone` / `All` / `Everybody` as an assignment,
+  matched by exact word before anything else so a team named "Everyone" could
+  never quietly win and send an evacuation notice to 25 people.
+
+**Not built here:** a push notification, and any "unread" state. An announcement
+lands in the schedule and on the socket like every other change; making a phone
+buzz is the notification layer the edit log's `audience_json` was always meant
+to feed, and it is not in this plan.
 
 ---
 
@@ -847,7 +893,7 @@ authorization, negative cases explicit.
   script."*
 - **Done when:** CI runs green and the authorization negatives are covered.
 
-**Partly done already**, as a side effect of items 6–17. 236 tests in `tests/`:
+**Partly done already**, as a side effect of items 6–18. 256 tests in `tests/`:
 
 - ✅ Access-code authorization, negatives explicit (`authorization.test.js`,
   `admin-codes.test.js`) — the done-when above is met on that clause.
@@ -868,6 +914,8 @@ authorization, negative cases explicit.
   session rather than against expectations (`view-as.test.js`).
 - ✅ Undo, weighted towards what it refuses — a batch edited since, a roster
   delete, an import, a legacy row (`undo.test.js`).
+- ✅ The announcement target, including the two CHECK rebuilds against a
+  pre-item-18 database (`announcements.test.js`, `person-roles.test.js`).
 - ❌ **Import pipeline** — time parsing across the accepted formats, assignment
   resolution, diff classification. Untouched, and the biggest remaining gap.
 - ❌ **No CI script.** `npm test` is run by hand.
@@ -976,7 +1024,7 @@ the two that actually catch problems.
 | ~~T-6 weeks~~ | ~~Phase A.~~ Done — but **real rosters are still not in hand**, and that is a people problem, not an engineering one. Chase it now; it is usually the long pole. |
 | ~~T-5~~ | ~~Phase B (access codes).~~ Done. |
 | T-4 | Phase C (reliability core) — items 9 ✅, 10 ✅, 11 ✅, 13 ✅ and 14 ✅ done; only item 12 remains, and it waits on the template. |
-| T-3 | Phase D + E (admin tooling, tests, load test) — items 15 ✅, 16 ✅ and 17 ✅ done early. |
+| T-3 | Phase D + E (admin tooling, tests, load test) — Phase D ✅ done early; Phase E remains. |
 | T-2 | Phase F + item 21 (deploy, ops, devices). |
 | T-1 | Items 24–26. Dress rehearsal. |
 | Event week | Items 27–28. Freeze Wednesday. |

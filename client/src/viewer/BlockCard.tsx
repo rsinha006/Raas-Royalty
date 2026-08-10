@@ -31,6 +31,13 @@ export default function BlockCard({
           {block.activity}{' '}
           {status === 'now' && <span className="badge now">Now</span>}
           {changed && status !== 'now' && <span className="badge changed">Changed</span>}
+          {/* Whose item is this? Every other block on the screen is here
+              because it is yours; an announcement is here because it is
+              everyone's, and "is this just me" is the first thing someone
+              asks when an evacuation notice appears on their schedule. */}
+          {block.appliesTo.type === 'everyone' && (
+            <span className="badge soft">Everyone</span>
+          )}
         </div>
         {block.location && (
           <div className="block-loc">

@@ -82,8 +82,17 @@ CREATE TABLE IF NOT EXISTS schedule_blocks (
   end_time        TEXT NOT NULL,   -- 'HH:MM', 24h
   location_id     TEXT REFERENCES locations(id) ON DELETE SET NULL,
   activity_label  TEXT NOT NULL,
-  applies_to_type TEXT NOT NULL CHECK (applies_to_type IN ('team', 'person', 'role')),
-  applies_to_id   TEXT NOT NULL,
+  -- 'everyone' is the event-wide announcement target — one block that reaches
+  -- every session, instead of six near-identical ones. It is a block *target*
+  -- only: never a session subject and never an access-code subject, which is
+  -- why those tables' CHECKs below stay three-way.
+  applies_to_type TEXT NOT NULL
+    CHECK (applies_to_type IN ('team', 'person', 'role', 'everyone')),
+  -- One announcement audience, not many. Pinning the id keeps the socket room
+  -- and the target_versions key singular rather than trusting every caller to
+  -- pass the same sentinel.
+  applies_to_id   TEXT NOT NULL
+    CHECK (applies_to_type <> 'everyone' OR applies_to_id = 'all'),
   notes           TEXT,
   source          TEXT NOT NULL DEFAULT 'manual',  -- 'manual' | 'import' | 'sheet'
   source_key      TEXT,            -- stable identity of the originating sheet row
@@ -150,7 +159,7 @@ CREATE TABLE IF NOT EXISTS meta (
 -- leaves no row behind, and "your 3pm was cancelled" is exactly the change a
 -- timestamp has to move for.
 CREATE TABLE IF NOT EXISTS target_versions (
-  target_type TEXT NOT NULL CHECK (target_type IN ('team', 'person', 'role')),
+  target_type TEXT NOT NULL CHECK (target_type IN ('team', 'person', 'role', 'everyone')),
   target_id   TEXT NOT NULL,
   updated_at  TEXT NOT NULL,
   PRIMARY KEY (target_type, target_id)

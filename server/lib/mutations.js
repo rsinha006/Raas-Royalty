@@ -1,5 +1,15 @@
 import { db, newId, nowIso, touchScheduleVersion, touchTargets } from '../db.js';
-import { describeTarget, getBlock } from './queries.js';
+import { EVERYONE, describeTarget, getBlock } from './queries.js';
+
+/**
+ * There is one announcement audience, so `everyone` always carries the same id.
+ * Normalized here rather than trusted from callers: every write path goes
+ * through these three functions, and a second sentinel would mean a second
+ * socket room and a second "last updated" key that nobody's session reads.
+ */
+function normalizeTarget(type, id) {
+  return type === EVERYONE.type ? EVERYONE.id : id;
+}
 
 /* ------------------------------------------------------------------ *
  * Edit log
@@ -10,6 +20,16 @@ import { describeTarget, getBlock } from './queries.js';
  * push-notification layer can fan out "your 2pm moved" without re-deriving it.
  */
 export function audienceForBlock({ appliesToType, appliesToId }) {
+  if (appliesToType === 'everyone') {
+    // Everyone with a schedule to be on — which is every person, not only the
+    // ones on teams. The log line for an evacuation should say how many people
+    // it reached, and that number is the whole roster.
+    const people = db.prepare('SELECT id, team_id FROM people').all();
+    return {
+      personIds: people.map((p) => p.id),
+      teamIds: db.prepare('SELECT id FROM teams').all().map((t) => t.id),
+    };
+  }
   if (appliesToType === 'person') {
     const p = db.prepare('SELECT team_id FROM people WHERE id = ?').get(appliesToId);
     return { personIds: [appliesToId], teamIds: p && p.team_id ? [p.team_id] : [] };
@@ -127,7 +147,11 @@ function timeLabel(b) {
   return `${b.day} ${b.startTime}–${b.endTime}`;
 }
 
-export function createBlock(input, ctx) {
+export function createBlock(rawInput, ctx) {
+  const input = {
+    ...rawInput,
+    appliesToId: normalizeTarget(rawInput.appliesToType, rawInput.appliesToId),
+  };
   const id = input.id || newId('blk');
   const ts = nowIso();
   db.prepare(
@@ -194,14 +218,17 @@ export function updateBlock(id, input, ctx, opts = {}) {
     return { id, conflict: true, current: before };
   }
 
+  const appliesToType = input.appliesToType ?? before.appliesTo.type;
   const merged = {
     day: input.day ?? before.day,
     startTime: input.startTime ?? before.startTime,
     endTime: input.endTime ?? before.endTime,
     locationId: input.locationId !== undefined ? input.locationId : before.location?.id ?? null,
     activity: input.activity ?? before.activity,
-    appliesToType: input.appliesToType ?? before.appliesTo.type,
-    appliesToId: input.appliesToId ?? before.appliesTo.id,
+    appliesToType,
+    // Retargeting an existing block to everyone has to pick up the sentinel id
+    // too, or it would carry the old team's id under the new type.
+    appliesToId: normalizeTarget(appliesToType, input.appliesToId ?? before.appliesTo.id),
     notes: input.notes !== undefined ? input.notes : before.notes,
   };
 

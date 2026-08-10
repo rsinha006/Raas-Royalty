@@ -16,6 +16,45 @@
 const columnNames = (db, table) =>
   new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
 
+/**
+ * Whether a table's stored DDL already permits the 'everyone' target.
+ *
+ * Reading `sqlite_master` is the only way to see a CHECK constraint — `PRAGMA
+ * table_info` reports columns and types and says nothing about constraints. It
+ * doubles as the idempotence guard: after the rebuild the new DDL contains the
+ * word, so the next boot skips it.
+ */
+function tableAllowsEveryone(db, table) {
+  const row = db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(table);
+  return !row || row.sql.includes("'everyone'");
+}
+
+/**
+ * Rebuild a table under a widened constraint: create, copy, drop, rename,
+ * re-index. The columns are copied by name from the old table, so this cannot
+ * silently reorder or drop one.
+ *
+ * `foreign_keys` is toggled around the transaction rather than inside it —
+ * SQLite ignores the pragma mid-transaction, and `schedule_blocks` is referenced
+ * by nothing but references `event_days` and `locations`, which the rename would
+ * otherwise trip over.
+ */
+function rebuild(db, { table, create, indexes }) {
+  const columns = [...columnNames(db, table)].join(', ');
+  db.pragma('foreign_keys = OFF');
+  try {
+    db.transaction(() => {
+      db.exec(create);
+      db.exec(`INSERT INTO ${table}_migrating (${columns}) SELECT ${columns} FROM ${table}`);
+      db.exec(`DROP TABLE ${table}`);
+      db.exec(`ALTER TABLE ${table}_migrating RENAME TO ${table}`);
+      for (const index of indexes) db.exec(index);
+    })();
+  } finally {
+    db.pragma('foreign_keys = ON');
+  }
+}
+
 export function runMigrations(db) {
   const applied = [];
 
@@ -114,6 +153,67 @@ export function runMigrations(db) {
   db.exec('CREATE INDEX IF NOT EXISTS idx_editlog_batch ON edit_log(batch_id)');
 
   backfillEditLogBatches(db);
+
+  /* ---- 'everyone' becomes a fourth block target ---- */
+
+  /**
+   * SQLite cannot alter a CHECK constraint, so widening one means rebuilding
+   * the table — create, copy, drop, rename, re-index, which is the procedure
+   * SQLite's own docs prescribe. Guarded on the stored DDL text rather than on
+   * a version number, so it runs exactly once and a database created fresh from
+   * `schema.sql` skips it entirely.
+   *
+   * Both rebuilds are inside a transaction. If either fails the server does not
+   * start, which is the right direction to fail: a half-migrated schedule table
+   * on the morning of the event is not something to discover later.
+   */
+  if (!tableAllowsEveryone(db, 'schedule_blocks')) {
+    rebuild(db, {
+      table: 'schedule_blocks',
+      create: `
+        CREATE TABLE schedule_blocks_migrating (
+          id              TEXT PRIMARY KEY,
+          day             TEXT NOT NULL REFERENCES event_days(key),
+          start_time      TEXT NOT NULL,
+          end_time        TEXT NOT NULL,
+          location_id     TEXT REFERENCES locations(id) ON DELETE SET NULL,
+          activity_label  TEXT NOT NULL,
+          applies_to_type TEXT NOT NULL
+            CHECK (applies_to_type IN ('team', 'person', 'role', 'everyone')),
+          applies_to_id   TEXT NOT NULL
+            CHECK (applies_to_type <> 'everyone' OR applies_to_id = 'all'),
+          notes           TEXT,
+          source          TEXT NOT NULL DEFAULT 'manual',
+          source_key      TEXT,
+          created_at      TEXT NOT NULL,
+          updated_at      TEXT NOT NULL,
+          last_change     TEXT
+        )`,
+      indexes: [
+        'CREATE INDEX IF NOT EXISTS idx_blocks_day ON schedule_blocks(day, start_time)',
+        'CREATE INDEX IF NOT EXISTS idx_blocks_target ON schedule_blocks(applies_to_type, applies_to_id)',
+        `CREATE UNIQUE INDEX IF NOT EXISTS idx_blocks_source_key
+           ON schedule_blocks(source_key) WHERE source_key IS NOT NULL`,
+      ],
+    });
+    applied.push('schedule_blocks: everyone target');
+  }
+
+  if (!tableAllowsEveryone(db, 'target_versions')) {
+    rebuild(db, {
+      table: 'target_versions',
+      create: `
+        CREATE TABLE target_versions_migrating (
+          target_type TEXT NOT NULL
+            CHECK (target_type IN ('team', 'person', 'role', 'everyone')),
+          target_id   TEXT NOT NULL,
+          updated_at  TEXT NOT NULL,
+          PRIMARY KEY (target_type, target_id)
+        )`,
+      indexes: [],
+    });
+    applied.push('target_versions: everyone target');
+  }
 
   /**
    * ---- target_versions — per-target "last updated" ----

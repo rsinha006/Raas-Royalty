@@ -129,6 +129,14 @@ export function resolveAssignment(raw, index) {
   const value = String(raw ?? '').trim();
   if (!value) return { error: 'Assignment is blank' };
 
+  /**
+   * The event-wide announcement target — item 18. Matched before anything else
+   * and by exact word, because it is the one assignment that cannot be a real
+   * name: a team called "Everyone" would be ambiguous, and silently preferring
+   * the team would post an evacuation notice to 25 people.
+   */
+  if (/^(everyone|all|everybody)$/i.test(value)) return { type: 'everyone', id: 'all' };
+
   let forced = null;
   let text = value;
   const prefix = value.match(/^(team|person|role)\s*:\s*(.+)$/i);

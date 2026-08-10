@@ -242,6 +242,8 @@ beforeEach(() => drain(...Object.values(seats).filter((s) => s?.inbox)));
 describe('who a socket is', () => {
   test('a team code joins the team room and the team-wide role, nothing else', () => {
     assert.deepEqual([...seats.teamA.rooms].filter((r) => r !== seats.teamA.id).sort(), [
+      // The announcement room, which every session is in — item 18.
+      'everyone:all',
       'role:dancer',
       'team:team_a',
     ]);
@@ -251,7 +253,13 @@ describe('who a socket is', () => {
     const rooms = [...seats.alice.rooms].filter((r) => r !== seats.alice.id).sort();
     // A captain holds Dancer + Captain, so both role rooms — this is the same
     // multi-role list that puts the Captains Meeting on their schedule.
-    assert.deepEqual(rooms, ['person:p_alice', 'role:captain', 'role:dancer', 'team:team_a']);
+    assert.deepEqual(rooms, [
+      'everyone:all',
+      'person:p_alice',
+      'role:captain',
+      'role:dancer',
+      'team:team_a',
+    ]);
   });
 
   test('an unidentified team session is deliberately not in the Captain room', () => {
@@ -305,6 +313,33 @@ describe('a change reaches its audience and stops there', () => {
     assert.equal(heard(seats.teamB), false, 'the other team should not');
     assert.equal(heard(seats.judge), false, 'a judge should not');
     assert.equal(heard(seats.anon), false, 'a socket with no session should not');
+  });
+
+  test('an announcement wakes every session, which is the one time that is right', async () => {
+    // Item 11 exists to stop a change waking all ~280 phones. Item 18 is the
+    // deliberate exception: an evacuation notice is the one change that really
+    // does affect everyone, and it goes out as one block rather than six.
+    const res = await call('POST', '/api/admin/blocks', {
+      cookies: seats.jars.admin,
+      body: {
+        day: 'Sat',
+        startTime: '13:00',
+        endTime: '13:15',
+        activity: 'Fire alarm — evacuate to the north car park',
+        appliesToType: 'everyone',
+        appliesToId: 'all',
+      },
+    });
+    assert.equal(res.status, 200);
+
+    assert.equal(heard(seats.teamA), true, 'a team code, before the identity step');
+    assert.equal(heard(seats.alice), true, 'a dancer');
+    assert.equal(heard(seats.teamB), true, 'the other team too');
+    assert.equal(heard(seats.judge), true, 'staff reached by their own code');
+    assert.equal(heard(seats.admin), true);
+    // Still not a socket with no session: it has no schedule to refetch, and
+    // "everyone" means everyone signed in, not every connection.
+    assert.equal(heard(seats.anon), false);
   });
 
   test('a person block wakes only that person', async () => {

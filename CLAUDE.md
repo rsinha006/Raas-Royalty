@@ -21,7 +21,7 @@ otherwise the reasoning is lost between sessions and gets re-litigated.
 npm install && npm run seed && npm run build && npm start   # http://localhost:4000
 npm run dev          # hot reload: client :5173, API :4000
 npm run seed:reset   # rebuild placeholder data from scratch
-npm test             # 236 tests
+npm test             # 256 tests
 npm run codes -- --list   # every live access code and its subject
 ```
 
@@ -50,6 +50,13 @@ React/Vite bundle from `client/dist`. No external services.
 - `client/src/admin/` — the logistics panel
 
 Seven things worth knowing before changing anything:
+
+**Block targets are four-way, and the fourth is not like the others.** A block
+targets a team, a person, a role, or `everyone` — the announcement audience,
+whose id is always `all` and which every session's targets contain. ⚠️ It is a
+block target *only*: never a session subject, never an access-code subject. The
+three-way CHECKs on `access_codes` and the view-as route are deliberately
+unchanged, and tests hold that line.
 
 **Roles are data, not an enum, and a person holds a set of them.** Roles live in
 `person_roles`; captains hold `Dancer` + `Captain`. A role row's `selector`
@@ -110,16 +117,16 @@ Data model and spreadsheet templates are documented in [README.md](README.md).
 
 ## Current state
 
-Phase A (1–4), Phase B (5–8), and items 9, 10, 11, 13, 14, 15, 16 and 17 are
-done — see
+Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13 and 14
+are done — see
 [PLAN.md](PLAN.md) for what each one settled. In short: the viewer is behind
 access codes enforced server-side, event times are resolved against the venue's
 timezone by the server, changes reach only the people they affect, each person's
 "last updated" is their own, concurrent admin edits are refused rather than
 silently merged, a whole afternoon can be pushed back in one previewed action,
 a reload with no signal still shows the last known schedule, an admin can see
-exactly what any one person sees, a change can be put back, and 236 tests run
-under `npm test`.
+exactly what any one person sees, a change can be put back, "fire alarm,
+evacuate" is one block rather than six, and 256 tests run under `npm test`.
 
 Still not true: no deployment and no real data.
 

@@ -13,8 +13,8 @@ competition weekend. **Read this at the start of every session.**
 
 ## Where things stand
 
-**Done: Phase A (1–4), Phase B (5–8), and items 9, 10, 11, 13, 14 and 15.** Last
-updated 2026-08-10.
+**Done: Phase A (1–4), Phase B (5–8), and items 9, 10, 11, 13, 14, 15 and 16.**
+Last updated 2026-08-10.
 
 - The viewer is **behind access codes**, enforced server-side, with the roster
   no longer enumerable. Codes are managed and exported from the admin panel.
@@ -32,16 +32,19 @@ updated 2026-08-10.
 - **A reload with no signal still works** — a service worker holds the app
   shell, so the offline schedule cache survives the refresh people reach for
   when a screen looks stale.
-- **198 tests** run under `npm test`, covering authorization negatives, timezone
+- **"I don't see my warm-up" is answerable from the panel** — View as renders
+  anyone's schedule from the query their own phone runs, next to why each block
+  reaches them and how they sign in.
+- **217 tests** run under `npm test`, covering authorization negatives, timezone
   and DST, code management, the schema migration, broadcast scoping, the item 14
-  correctness gaps, the bulk shift, and the offline shell.
+  correctness gaps, the bulk shift, the offline shell, and preview fidelity.
 
 The open decisions are all resolved (see below); item 12 was reshaped by them.
 
 **Not yet true of this project:** no deployment and no real data.
 
-**Next up, per the build order: the rest of Phase D — 16 (view as), 17 (undo),
-18 (announcements) — then Phase E.**
+**Next up, per the build order: the rest of Phase D — 17 (undo), 18
+(announcements) — then Phase E.**
 
 ### Build order
 
@@ -53,7 +56,7 @@ Everything else proceeds now, in this order:
 2. ~~**Phase B (5–8)** — access codes.~~ Done.
 3. ~~**Items 9, 13, 11, 14, 10**~~ — timezone ✅, the two schema columns ✅,
    scoped broadcasts ✅, correctness gaps ✅, service worker ✅. Done.
-4. **Phase D (15–18)** — admin tooling. Item 15 ✅; 16–18 remain.
+4. **Phase D (15–18)** — admin tooling. Items 15 ✅ and 16 ✅; 17–18 remain.
 5. **Item 12 last**, against a frozen template.
 
 Item 12 splits: only the tab readers depend on the template's shape. Diff
@@ -731,10 +734,49 @@ npm test
 location rather than by ticking rows. Both are speculative until someone has run
 a real day through this.
 
-### 16. `[ ]` "View as" preview
+### 16. `[x]` "View as" preview
 
 See exactly what a given team or person sees. Essential for "I don't see my
 warm-up."
+
+**Done 2026-08-10** — `server/lib/view-as.js`, `GET /api/admin/view-as`,
+`client/src/admin/ViewAsPanel.tsx`, and 19 new tests (`tests/view-as.test.js`,
+217 total). Verified in the browser against the seed data and confirmed live
+against a real signed-in viewer: identical 13 blocks, same subject, same
+`updatedAt`.
+
+```bash
+npm test
+```
+
+- ⚠️ **The preview is the viewer's payload, returned unmodified** — same
+  function, same argument shape, under a `schedule` key with the diagnostics
+  beside it rather than mixed in. A preview that re-derived matching would be
+  least reliable exactly when it is opened, because it would share the admin's
+  assumptions rather than the phone's code. The central test signs a real viewer
+  in with a real access code and asserts the two payloads are equal; keep it.
+- **The diagnostics are the feature.** "I don't see my warm-up" has four
+  answers needing four different fixes, so the panel shows the targets the query
+  ORs over and how the person signs in. Demonstrated: a captain's view holds the
+  three captain blocks and lists `role:All Captain` among her targets; her
+  teammate's holds neither, and the missing target is the visible reason.
+- **A team preview names the people behind the identity step.** The team view is
+  real — it is what a captain sees while deciding which name to tap — and it
+  holds no person-targeted or captain blocks at all (verified: 10 blocks, zero
+  of either). That is the most common answer, so the members are one click away.
+- **An unreachable subject is called out.** A dancer unassigned from a team by
+  item 14's delete has a correct schedule and no way to open it; so does anyone
+  whose code was never issued. Both read as unreachable rather than as empty.
+- **No access code string in the response** — "is there a live code" is the
+  diagnostic, but minting and showing links stays in the Access codes tab.
+  There is a test asserting the code never appears.
+- **Rejected: an impersonation mode** that issues the admin a real viewer
+  session. Maximally faithful, but it puts a second code-redemption path next to
+  the one item 6 locked down, and writes `last_used_at` on codes nobody used.
+
+**Not built here:** previewing at a *time* ("what will she see at 3pm?"). The
+timeline already takes an instant, so it is a small addition, but nobody has run
+a real day through this yet — same reasoning as item 15's deferred filters.
 
 ### 17. `[ ]` Undo / revert last change
 
@@ -762,7 +804,7 @@ authorization, negative cases explicit.
   script."*
 - **Done when:** CI runs green and the authorization negatives are covered.
 
-**Partly done already**, as a side effect of items 6–15. 198 tests in `tests/`:
+**Partly done already**, as a side effect of items 6–16. 217 tests in `tests/`:
 
 - ✅ Access-code authorization, negatives explicit (`authorization.test.js`,
   `admin-codes.test.js`) — the done-when above is met on that clause.
@@ -779,6 +821,8 @@ authorization, negative cases explicit.
   batch refuses (`time-shift.test.js`).
 - ✅ The offline shell, run as the real generated worker inside a fake
   `ServiceWorkerGlobalScope` (`service-worker.test.js`).
+- ✅ "View as" fidelity, asserted against a real code-authenticated viewer
+  session rather than against expectations (`view-as.test.js`).
 - ❌ **Import pipeline** — time parsing across the accepted formats, assignment
   resolution, diff classification. Untouched, and the biggest remaining gap.
 - ❌ **No CI script.** `npm test` is run by hand.
@@ -886,7 +930,7 @@ the two that actually catch problems.
 | ~~T-6 weeks~~ | ~~Phase A.~~ Done — but **real rosters are still not in hand**, and that is a people problem, not an engineering one. Chase it now; it is usually the long pole. |
 | ~~T-5~~ | ~~Phase B (access codes).~~ Done. |
 | T-4 | Phase C (reliability core) — items 9 ✅, 10 ✅, 11 ✅, 13 ✅ and 14 ✅ done; only item 12 remains, and it waits on the template. |
-| T-3 | Phase D + E (admin tooling, tests, load test) — item 15 ✅ done early. |
+| T-3 | Phase D + E (admin tooling, tests, load test) — items 15 ✅ and 16 ✅ done early. |
 | T-2 | Phase F + item 21 (deploy, ops, devices). |
 | T-1 | Items 24–26. Dress rehearsal. |
 | Event week | Items 27–28. Freeze Wednesday. |

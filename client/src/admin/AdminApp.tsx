@@ -7,13 +7,15 @@ import SchedulePanel from './SchedulePanel';
 import ImportPanel from './ImportPanel';
 import LogPanel from './LogPanel';
 import CodesPanel from './CodesPanel';
+import ViewAsPanel from './ViewAsPanel';
 
-type Tab = 'overview' | 'schedule' | 'roster' | 'codes' | 'import' | 'log';
+type Tab = 'overview' | 'schedule' | 'roster' | 'viewAs' | 'codes' | 'import' | 'log';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
   { id: 'schedule', label: 'Schedule' },
   { id: 'roster', label: 'Roster' },
+  { id: 'viewAs', label: 'View as' },
   { id: 'codes', label: 'Access codes' },
   { id: 'import', label: 'Import & Sync' },
   { id: 'log', label: 'Change log' },
@@ -125,6 +127,7 @@ export default function AdminApp() {
             keep remounting; they hold nothing anyone typed. */}
         {tab === 'schedule' && <SchedulePanel refreshKey={refreshKey} onChanged={refresh} />}
         {tab === 'roster' && <RosterPanel refreshKey={refreshKey} onChanged={refresh} />}
+        {tab === 'viewAs' && <ViewAsPanel key={refreshKey} />}
         {tab === 'codes' && <CodesPanel key={refreshKey} />}
         {tab === 'import' && <ImportPanel onChanged={refresh} />}
         {tab === 'log' && <LogPanel key={refreshKey} />}

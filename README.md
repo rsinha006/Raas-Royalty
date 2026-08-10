@@ -85,6 +85,25 @@ A block targets a team, a single person, or a whole role.
   hold, and their team's blocks if they have a team. This is what carries the
   captain-only blocks to a captain and to nobody else.
 
+## "I don't see my warm-up"
+
+The panel's **View as** tab renders any team, person, or role's schedule from
+the same query their phone runs — not a reconstruction of it, so the two cannot
+disagree. Alongside it are the two things that turn a complaint into a fix:
+
+- **Why these blocks** — the targets this view ORs over. A block missing from
+  someone's screen is a block whose target is not in that list, which is
+  readable without opening the database.
+- **How they sign in** — their own link, or their team's link plus the identity
+  step, and whether a live code exists at all. A dancer left on no team (which
+  is what deleting a team does to its members) shows as unreachable here; their
+  schedule is fine and they have no way to open it.
+
+Previewing a team also lists the people behind the identity step, because "she
+can't see her warm-up" is most often "she is looking at the team view and hasn't
+tapped her name yet" — the team view holds no person-targeted or captain blocks
+at all.
+
 ## Running late
 
 The Schedule tab's **Shift times** does what running late actually needs:

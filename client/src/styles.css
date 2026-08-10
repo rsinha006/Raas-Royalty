@@ -916,6 +916,61 @@ a {
   color: var(--text-dim);
 }
 
+/* "View as" — a picker of subjects, and a framed copy of the viewer.
+
+   The frame is what stops an admin misreading a preview as the panel: the
+   schedule inside it is the participant's screen, not an editable one, so it
+   is inset and labelled rather than blended into the surrounding cards. */
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--bg-raised-2);
+  border: 1px solid var(--line-soft);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 8px 13px;
+  font-size: 14px;
+  line-height: 1.2;
+  cursor: pointer;
+}
+.chip.is-on {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+.chip.is-static {
+  cursor: default;
+}
+.chip-kind {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-faint);
+}
+
+.viewer-frame {
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+  padding: 14px;
+  margin-top: 12px;
+  background: var(--bg);
+}
+.viewer-frame::before {
+  content: 'Their screen';
+  display: block;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+  margin-bottom: 10px;
+}
+
 /* ------------------------------ larger screens ------------------------------ */
 
 @media (min-width: 640px) {

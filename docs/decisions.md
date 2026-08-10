@@ -770,3 +770,51 @@ whose behaviour lives in its configuration — and the whole decision above is
 about what the worker refuses to do. Sixty lines of routing that can be read,
 and tested against a fake `ServiceWorkerGlobalScope`, is the better trade at
 this size.
+
+---
+
+## "View as" renders the viewer's payload, not a reconstruction of it
+**Date:** 2026-08-10 · **Status:** decided
+
+**Question.** How faithful does the admin preview have to be, and what does it
+show beyond the schedule itself?
+
+**Decision.** `/api/admin/view-as` calls `getPersonalizedSchedule` — the
+viewer's own function, with the viewer's own argument shape — and returns that
+payload unmodified under a `schedule` key. Diagnostics ride alongside it rather
+than inside it: the resolved target list, and how a real holder reaches the
+view. The panel renders it with the viewer's own components (`NowNext`,
+`BlockCard`, `ContactCard`, `buildTimeline`).
+
+**Why.** A preview that re-derives matching would be at its least reliable
+exactly when it matters. This tool is opened because someone says the app is
+showing them the wrong thing; if the preview shares the admin's assumptions
+rather than the phone's code, it will agree with the admin and the dancer will
+still be standing in the wrong room. Returning the untouched payload makes the
+fidelity checkable, and the test suite checks it by signing a real viewer in
+with a real access code and asserting the two payloads match.
+
+Three things follow:
+
+**The diagnostics are the feature, not the schedule.** "Here is her schedule"
+does not answer "why can't she see her warm-up" — the four reasons that is ever
+true need four different fixes (wrong block target, looking at the pre-identity
+team view, no longer on that team, never signed in). So the panel shows the
+target list the query ORs over, and the sign-in route. A dancer unassigned from
+a team by item 14's delete has a perfectly correct schedule and no way to open
+it, which no amount of staring at blocks would reveal.
+
+**A team preview names the people behind the identity step.** The team view is
+a real view — it is what a captain sees while deciding which name to tap — and
+it deliberately holds no person-targeted or captain blocks. Making that visible,
+with the members one click away, is the single most common answer.
+
+**No access code string in the response.** Whether a live code exists is the
+diagnostic; producing the link stays in the Access codes tab, so there is one
+place that mints and displays credentials. Worth a tab switch.
+
+**Rejected:** an impersonation mode that issues a real viewer session to the
+admin. It would be maximally faithful, and it would mean the panel can mint a
+session for any subject — a much larger thing to get right than a read-only
+query, and it would put a second code-redemption path next to the one item 6
+locked down. It would also write `last_used_at` on codes nobody used.

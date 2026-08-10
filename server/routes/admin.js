@@ -44,6 +44,7 @@ import {
 import { applyRosterDiff, computeRosterDiff } from '../sync/diff.js';
 import { uploadSource } from '../sync/sources.js';
 import { adminCodesRouter } from './admin-codes.js';
+import { previewFor } from '../lib/view-as.js';
 import { listCodes, missingSubjects } from '../lib/access-codes.js';
 import { eventTimeState } from '../lib/event-time.js';
 import { roomsForTargets } from '../lib/live.js';
@@ -892,6 +893,32 @@ export function adminRouter({ broadcast }) {
 
   router.get('/log', (req, res) => {
     res.json({ entries: listEditLog({ limit: Number(req.query.limit) || 200 }) });
+  });
+
+  /**
+   * "View as" — the exact schedule one subject sees, plus why.
+   *
+   * This is the one admin read that takes a subject id from the caller, which
+   * is fine because it sits behind `requireAdmin` and an admin can already read
+   * every block and every person through `/roster` and `/blocks`. It discloses
+   * nothing new; it assembles what is already reachable into the shape the
+   * person on the phone is looking at.
+   *
+   * Deliberately no access *code* in the response. "Is there a live code" is
+   * the diagnostic; producing the link is the Access codes tab's job, and
+   * keeping one place that shows credentials is worth a tab switch.
+   */
+  router.get('/view-as', (req, res) => {
+    const type = String(req.query.type || '');
+    const id = String(req.query.id || '');
+    if (!['team', 'person', 'role'].includes(type) || !id) {
+      return res.status(400).json({ error: 'Expected type=team|person|role and id.' });
+    }
+    const preview = previewFor({ type, id });
+    // "Nothing scheduled" and "no such person" are the two answers this tool
+    // must never blur, so a missing subject is a 404 rather than an empty day.
+    if (!preview) return res.status(404).json({ error: 'That subject is no longer in the roster.' });
+    res.json(preview);
   });
 
   /** Convenience for the manual editor: every possible assignment target. */

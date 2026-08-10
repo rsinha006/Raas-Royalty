@@ -124,13 +124,15 @@ export default function AdminApp() {
             typing the moment anyone else saves anything — which is the
             concurrent-edit problem, not a fix for it. They take the key as a
             prop and reload in place instead. The read-only panels below can
-            keep remounting; they hold nothing anyone typed. */}
+            keep remounting; they hold nothing anyone typed — except the change
+            log, which since item 17 holds a confirm step and the result of an
+            undo, so it takes the key the same way. */}
         {tab === 'schedule' && <SchedulePanel refreshKey={refreshKey} onChanged={refresh} />}
         {tab === 'roster' && <RosterPanel refreshKey={refreshKey} onChanged={refresh} />}
         {tab === 'viewAs' && <ViewAsPanel key={refreshKey} />}
         {tab === 'codes' && <CodesPanel key={refreshKey} />}
         {tab === 'import' && <ImportPanel onChanged={refresh} />}
-        {tab === 'log' && <LogPanel key={refreshKey} />}
+        {tab === 'log' && <LogPanel refreshKey={refreshKey} onChanged={refresh} />}
       </div>
     </div>
   );

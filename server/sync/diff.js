@@ -101,7 +101,12 @@ export function computeScheduleDiff(rows, { removeMissing = true } = {}) {
  * that team, not the whole event, and a re-sync that changed nothing at all
  * wakes nobody. See `server/lib/live.js` for how they become rooms.
  */
-export function applyScheduleDiff(diff, ctx) {
+export function applyScheduleDiff(diff, ctxIn) {
+  // One import is one batch, whoever triggered it — a route passes its own id,
+  // background polling has no request to take one from. Undo will not offer an
+  // import (see lib/undo.js), but the change log still reads as one action
+  // rather than as three hundred unrelated rows.
+  const ctx = { ...ctxIn, batchId: ctxIn.batchId || newId('batch') };
   const source = ctx.source || 'import';
   const targets = [];
   const run = db.transaction(() => {
@@ -153,6 +158,7 @@ export function applyScheduleDiff(diff, ctx) {
 
     logEdit({
       editedBy: ctx.editedBy,
+      batchId: ctx.batchId,
       source,
       changeType: 'sync',
       summary: `${ctx.label || 'Spreadsheet import'}: ${diff.create.length} added, ${diff.update.length} changed, ${diff.delete.length} removed, ${diff.unchanged} unchanged`,
@@ -269,7 +275,8 @@ export function computeRosterDiff(rows, { removeMissing = false } = {}) {
   };
 }
 
-export function applyRosterDiff(diff, ctx) {
+export function applyRosterDiff(diff, ctxIn) {
+  const ctx = { ...ctxIn, batchId: ctxIn.batchId || newId('batch') };
   const run = db.transaction(() => {
     const teamId = (name) => {
       const found = db.prepare('SELECT id FROM teams WHERE lower(name) = lower(?)').get(name);
@@ -333,6 +340,7 @@ export function applyRosterDiff(diff, ctx) {
 
     logEdit({
       editedBy: ctx.editedBy,
+      batchId: ctx.batchId,
       source: ctx.source || 'import',
       changeType: 'roster',
       summary: `Roster import: ${diff.createPeople.length} people added, ${diff.updatePeople.length} updated, ${diff.deletePeople.length} removed, ${diff.createTeams.length} teams created`,

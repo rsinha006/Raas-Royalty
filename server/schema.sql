@@ -99,6 +99,21 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_blocks_source_key
 
 -- Every mutation lands here. `audience_json` records who was affected, which is
 -- what a future push-notification layer needs to fan out per-user alerts.
+--
+-- The last four columns are what makes the log reversible rather than merely
+-- readable. `change_summary` is prose for a human; undo needs state, and
+-- parsing "time 15:00–15:30 → 15:20–15:50" back into fields would be a
+-- fragile trick that fails silently the first time the wording changes.
+--   before_json    the block as it stood before, or NULL for a creation
+--   after_version  the `updated_at` the block ended up with, or NULL for a
+--                  deletion — the same token item 14's concurrency guard uses,
+--                  so undo can refuse a block that has moved since
+--   batch_id       one admin action, however many blocks it touched. A bulk
+--                  shift undone one row at a time would leave exactly the
+--                  half-shifted day item 15 refuses to create.
+--   undone_at      set when reverted, so a batch cannot be undone twice
+-- The four columns are added in migrate.js as well, for databases that predate
+-- them.
 CREATE TABLE IF NOT EXISTS edit_log (
   id                TEXT PRIMARY KEY,
   schedule_block_id TEXT,
@@ -107,10 +122,16 @@ CREATE TABLE IF NOT EXISTS edit_log (
   timestamp         TEXT NOT NULL,
   change_type       TEXT NOT NULL,
   change_summary    TEXT NOT NULL,
-  audience_json     TEXT
+  audience_json     TEXT,
+  before_json       TEXT,
+  after_version     TEXT,
+  batch_id          TEXT,
+  undone_at         TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_editlog_time ON edit_log(timestamp DESC);
+-- The index on batch_id is created in migrate.js, not here: on a database that
+-- predates the column there would be nothing to index at this point.
 
 CREATE TABLE IF NOT EXISTS meta (
   key   TEXT PRIMARY KEY,

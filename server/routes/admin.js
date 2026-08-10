@@ -45,6 +45,7 @@ import { applyRosterDiff, computeRosterDiff } from '../sync/diff.js';
 import { uploadSource } from '../sync/sources.js';
 import { adminCodesRouter } from './admin-codes.js';
 import { previewFor } from '../lib/view-as.js';
+import { applyUndo, listBatches, planUndo } from '../lib/undo.js';
 import { listCodes, missingSubjects } from '../lib/access-codes.js';
 import { eventTimeState } from '../lib/event-time.js';
 import { roomsForTargets } from '../lib/live.js';
@@ -120,6 +121,34 @@ export function adminRouter({ broadcast }) {
   // Everything below requires a valid admin cookie.
   router.use(requireAdmin);
 
+  /**
+   * One request is one batch.
+   *
+   * Undo reverts a batch rather than a log row, because a bulk shift undone a
+   * row at a time is the half-shifted day item 15 refuses to create. Stamping
+   * it here rather than per route means every write a request makes shares it —
+   * including the ones that are *not* reversible, which is the point: deleting
+   * a person writes block-delete rows and a roster row into the same batch, and
+   * undo refuses the batch because that roster row is in it. Threading the id
+   * by hand would eventually miss one, and the failure would be restoring
+   * blocks that point at a person who no longer exists.
+   */
+  router.use((req, res, next) => {
+    req.batchId = newId('batch');
+    next();
+  });
+
+  /**
+   * Provenance for a write: who, from where, and which admin action.
+   * `source` is 'manual' for a hand-edited block and 'admin' for a panel action
+   * that moves several at once — a distinction the change log has always drawn.
+   */
+  const editorContext = (req, source = 'admin') => ({
+    editedBy: editorName(req),
+    source,
+    batchId: req.batchId,
+  });
+
   /* ---------------------------------------------------------------- *
    * Access codes
    * ---------------------------------------------------------------- */
@@ -191,7 +220,7 @@ export function adminRouter({ broadcast }) {
    * timestamp rather than any one target's.
    */
   const rosterChanged = (req, summary) => {
-    logEdit({ editedBy: editorName(req), source: 'admin', changeType: 'roster', summary });
+    logEdit({ ...editorContext(req), changeType: 'roster', summary });
     touchRosterVersion();
     const ts = touchScheduleVersion();
     broadcast('roster:updated', { updatedAt: ts }, { refreshRooms: true });
@@ -311,10 +340,7 @@ export function adminRouter({ broadcast }) {
     }
 
     db.transaction(() => {
-      deleteBlocksForTarget('person', req.params.id, {
-        editedBy: editorName(req),
-        source: 'admin',
-      });
+      deleteBlocksForTarget('person', req.params.id, editorContext(req));
       db.prepare('DELETE FROM people WHERE id = ?').run(req.params.id);
     })();
 
@@ -405,7 +431,7 @@ export function adminRouter({ broadcast }) {
     }
 
     db.transaction(() => {
-      deleteBlocksForTarget('team', req.params.id, { editedBy: editorName(req), source: 'admin' });
+      deleteBlocksForTarget('team', req.params.id, editorContext(req));
       db.prepare('DELETE FROM teams WHERE id = ?').run(req.params.id);
     })();
 
@@ -538,7 +564,7 @@ export function adminRouter({ broadcast }) {
     const locationId = b.locationId || ensureLocation(b.venue, b.subLocation);
     const id = createBlock(
       { ...b, locationId },
-      { editedBy: editorName(req), source: 'manual' }
+      editorContext(req, 'manual')
     );
     const updatedAt = scheduleChanged({ changedBlockIds: [id] }, [
       { type: b.appliesToType, id: b.appliesToId },
@@ -575,7 +601,7 @@ export function adminRouter({ broadcast }) {
     const result = updateBlock(
       req.params.id,
       patch,
-      { editedBy: editorName(req), source: 'manual' },
+      editorContext(req, 'manual'),
       { expectedUpdatedAt: b.expectedUpdatedAt || null }
     );
     if (!result) return res.status(404).json({ error: 'Not found' });
@@ -589,7 +615,7 @@ export function adminRouter({ broadcast }) {
   router.delete('/blocks/:id', (req, res) => {
     const removed = deleteBlock(
       req.params.id,
-      { editedBy: editorName(req), source: 'manual' },
+      editorContext(req, 'manual'),
       // On the query string because DELETE request bodies are not reliably
       // sent by intermediaries.
       { expectedUpdatedAt: req.query.expectedUpdatedAt || null }
@@ -687,7 +713,7 @@ export function adminRouter({ broadcast }) {
       });
     }
 
-    const ctx = { editedBy: editorName(req), source: 'admin' };
+    const ctx = editorContext(req);
     // One transaction, and each block through `updateBlock` — so every move gets
     // its own edit-log line with an audience and moves its target's timestamp.
     // "Why did my 3pm move" has to stay answerable per block, not just per batch.
@@ -710,8 +736,7 @@ export function adminRouter({ broadcast }) {
     // The summary is what an admin scans the log for; the per-block lines above
     // are what they drill into once they have found it.
     logEdit({
-      editedBy: ctx.editedBy,
-      source: 'admin',
+      ...ctx,
       changeType: 'updated',
       summary: describeShift(moves, minutes),
     });
@@ -752,6 +777,7 @@ export function adminRouter({ broadcast }) {
         dryRun: false,
         removeMissing: req.body.removeMissing !== false,
         editedBy: editorName(req),
+        batchId: req.batchId,
         source: 'import',
         label: `Import of ${rec.filename}`,
       });
@@ -771,7 +797,7 @@ export function adminRouter({ broadcast }) {
   /** Fallback trigger for the live sheet connection (and re-runs the last upload today). */
   router.post('/schedule/resync', async (req, res) => {
     try {
-      const result = await pullAndSync({ editedBy: editorName(req) });
+      const result = await pullAndSync({ editedBy: editorName(req), batchId: req.batchId });
       broadcast(
         'schedule:updated',
         { updatedAt: result.updatedAt, reason: 'resync' },
@@ -808,14 +834,13 @@ export function adminRouter({ broadcast }) {
     // runs once, before real data lands.
     const targets = db.transaction(() =>
       seeded
-        .map((b) => deleteBlock(b.id, { editedBy: editorName(req), source: 'admin' }))
+        .map((b) => deleteBlock(b.id, editorContext(req)))
         .filter(Boolean)
         .map((removed) => removed.target)
     )();
 
     logEdit({
-      editedBy: editorName(req),
-      source: 'admin',
+      ...editorContext(req),
       changeType: 'deleted',
       summary: `Cleared ${seeded.length} placeholder schedule block(s)`,
     });
@@ -861,7 +886,11 @@ export function adminRouter({ broadcast }) {
         return res.status(400).json({ error: 'Every row failed validation — nothing was applied.', errors });
       }
       const diff = computeRosterDiff(rows, { removeMissing: req.body.removeMissing === true });
-      const updatedAt = applyRosterDiff(diff, { editedBy: editorName(req), source: 'import' });
+      const updatedAt = applyRosterDiff(diff, {
+        editedBy: editorName(req),
+        source: 'import',
+        batchId: req.batchId,
+      });
       broadcast('roster:updated', { updatedAt });
       res.json({ ok: true, diff, errors, updatedAt });
     } catch (err) {
@@ -893,6 +922,52 @@ export function adminRouter({ broadcast }) {
 
   router.get('/log', (req, res) => {
     res.json({ entries: listEditLog({ limit: Number(req.query.limit) || 200 }) });
+  });
+
+  /* ---------------------------------------------------------------- *
+   * Undo
+   * ---------------------------------------------------------------- */
+
+  /** Recent admin actions, newest first, each carrying whether it can be undone. */
+  router.get('/undo', (req, res) => {
+    res.json({ batches: listBatches({ limit: Number(req.query.limit) || 40 }) });
+  });
+
+  /**
+   * What undoing this would do — the per-block reversals and anything in the
+   * way. Same shape as item 15's shift preview and for the same reason: putting
+   * a schedule back mid-event deserves a look before the leap, and the blockers
+   * are more useful than a greyed-out button.
+   */
+  router.get('/undo/:batchId', (req, res) => {
+    const plan = planUndo(req.params.batchId);
+    if (!plan) return res.status(404).json({ error: 'No such change.' });
+    res.json(plan);
+  });
+
+  router.post('/undo', (req, res) => {
+    const batchId = String(req.body?.batchId || '');
+    if (!batchId) return res.status(400).json({ error: 'Which change?' });
+
+    const result = applyUndo(batchId, editorContext(req));
+    if (!result.ok) {
+      if (result.reason === 'missing' && !result.plan) {
+        return res.status(404).json({ error: 'No such change.' });
+      }
+      // 409, not 400: the request was fine, the world moved. Same status the
+      // block editor and the bulk shift return for the same situation.
+      return res.status(409).json({
+        error: result.plan.blockers[0].label,
+        reason: result.reason,
+        blockers: result.plan.blockers,
+      });
+    }
+
+    const updatedAt = scheduleChanged(
+      { changedBlockIds: result.changedBlockIds, reason: 'undo' },
+      result.targets
+    );
+    res.json({ ok: true, undone: result.undone, summary: result.plan.summary, updatedAt });
   });
 
   /**

@@ -122,6 +122,28 @@ event day, and one that would cross into a day the event doesn't have is left
 out and named, because guessing there would write a plausible-looking time
 exactly 24 hours wrong.
 
+## Putting a change back
+
+The **Change log** groups by action rather than by row: a bulk shift is one
+entry reading "Moved 18 block(s) on Sat from 15:05 by +25 min", with its
+per-block lines folded underneath and an **Undo** next to it that puts back all
+eighteen. Undo per row would let someone move half a day back and leave the
+rest, which is the state the bulk shift goes out of its way to avoid.
+
+It is all-or-nothing and checked before anything is written. If someone else has
+edited one of those blocks since, the whole batch refuses and names the block —
+nothing is put back. An undo is itself a logged action, so it can be undone in
+turn.
+
+Some entries show a reason instead of a button:
+
+| Entry | Why not |
+| --- | --- |
+| Deleting a person or team | Their blocks would come back and they would not. |
+| A roster edit | Roster rows carry no version to check a restore against. |
+| A spreadsheet import | It owns rows through `source_key`; a revert would be re-applied by the next sync. Fix the sheet and re-sync instead. |
+| Anything logged before this feature | No prior state was recorded, and the summary text is prose, not data. |
+
 ## Import and sync
 
 Everything flows through one pipeline:

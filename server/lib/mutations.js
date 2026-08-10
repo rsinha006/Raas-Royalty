@@ -31,6 +31,29 @@ export function audienceForBlock({ appliesToType, appliesToId }) {
   return { personIds: people.map((p) => p.id), teamIds };
 }
 
+/**
+ * A batch id belongs on `ctx` — unlike `expectedUpdatedAt`, which the block
+ * mutations take as their own argument precisely so it cannot ride along on a
+ * spread context. The difference is that a version token is a precondition
+ * belonging to one call, while "which admin action was this part of" is
+ * provenance, exactly like `editedBy` and `source`, and *should* be shared
+ * across every write the action makes.
+ *
+ * Defaulted rather than required, so a caller that does not care still produces
+ * a well-formed batch of one and undo has a single shape to work with.
+ */
+export function batchIdFrom(ctx) {
+  return ctx?.batchId || newId('batch');
+}
+
+/**
+ * @param before the block as it stood, for changes that overwrote something.
+ *   This is what makes the row reversible; `summary` is prose for a human and
+ *   parsing it back would break the first time the wording changed.
+ * @param afterVersion the `updated_at` the block ended up with — the token undo
+ *   checks before touching anything, so a block edited since refuses instead of
+ *   being silently rolled back over.
+ */
 export function logEdit({
   blockId = null,
   editedBy,
@@ -38,12 +61,16 @@ export function logEdit({
   changeType,
   summary,
   audience = null,
+  before = null,
+  afterVersion = null,
+  batchId = null,
 }) {
   const id = newId('log');
   db.prepare(
     `INSERT INTO edit_log
-       (id, schedule_block_id, edited_by, source, timestamp, change_type, change_summary, audience_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+       (id, schedule_block_id, edited_by, source, timestamp, change_type, change_summary,
+        audience_json, before_json, after_version, batch_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     id,
     blockId,
@@ -52,7 +79,10 @@ export function logEdit({
     nowIso(),
     changeType,
     summary,
-    audience ? JSON.stringify(audience) : null
+    audience ? JSON.stringify(audience) : null,
+    before ? JSON.stringify(before) : null,
+    afterVersion,
+    batchId || newId('batch')
   );
   return id;
 }
@@ -137,6 +167,11 @@ export function createBlock(input, ctx) {
       input.appliesToId
     )}`,
     audience: audienceForBlock(input),
+    // Nothing was overwritten, so undoing a creation is a deletion and needs no
+    // prior state — only the version to check it against.
+    before: null,
+    afterVersion: ts,
+    batchId: batchIdFrom(ctx),
   });
   return id;
 }
@@ -243,6 +278,9 @@ export function updateBlock(id, input, ctx, opts = {}) {
       personIds: [...new Set([...audience.personIds, ...priorAudience.personIds])],
       teamIds: [...new Set([...audience.teamIds, ...priorAudience.teamIds])],
     },
+    before,
+    afterVersion: ts,
+    batchId: batchIdFrom(ctx),
   });
   // Both targets, for the same reason the audience above merges two: reassigning
   // a block means one side gained it and the other side lost it, and telling
@@ -285,6 +323,11 @@ export function deleteBlock(id, ctx, opts = {}) {
       appliesToType: before.appliesTo.type,
       appliesToId: before.appliesTo.id,
     }),
+    before,
+    // No "after": the block is gone, and undo's precondition is that it is
+    // still gone rather than that it still carries a particular version.
+    afterVersion: null,
+    batchId: batchIdFrom(ctx),
   });
   return { id, target: { type: before.appliesTo.type, id: before.appliesTo.id } };
 }

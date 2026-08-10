@@ -13,8 +13,8 @@ competition weekend. **Read this at the start of every session.**
 
 ## Where things stand
 
-**Done: Phase A (1–4), Phase B (5–8), and items 9, 10, 11, 13, 14, 15 and 16.**
-Last updated 2026-08-10.
+**Done: Phase A (1–4), Phase B (5–8), and items 9, 10, 11, 13, 14, 15, 16 and
+17.** Last updated 2026-08-10.
 
 - The viewer is **behind access codes**, enforced server-side, with the roster
   no longer enumerable. Codes are managed and exported from the admin panel.
@@ -35,16 +35,18 @@ Last updated 2026-08-10.
 - **"I don't see my warm-up" is answerable from the panel** — View as renders
   anyone's schedule from the query their own phone runs, next to why each block
   reaches them and how they sign in.
-- **217 tests** run under `npm test`, covering authorization negatives, timezone
-  and DST, code management, the schema migration, broadcast scoping, the item 14
-  correctness gaps, the bulk shift, the offline shell, and preview fidelity.
+- **A change can be put back** — one admin action is one entry in the log, and
+  undo reverts all of it or refuses and writes nothing.
+- **236 tests** run under `npm test`, covering authorization negatives, timezone
+  and DST, code management, the schema migrations, broadcast scoping, the item 14
+  correctness gaps, the bulk shift, the offline shell, preview fidelity, and
+  everything undo refuses.
 
 The open decisions are all resolved (see below); item 12 was reshaped by them.
 
 **Not yet true of this project:** no deployment and no real data.
 
-**Next up, per the build order: the rest of Phase D — 17 (undo), 18
-(announcements) — then Phase E.**
+**Next up: item 18 (announcements), which closes Phase D — then Phase E.**
 
 ### Build order
 
@@ -56,7 +58,7 @@ Everything else proceeds now, in this order:
 2. ~~**Phase B (5–8)** — access codes.~~ Done.
 3. ~~**Items 9, 13, 11, 14, 10**~~ — timezone ✅, the two schema columns ✅,
    scoped broadcasts ✅, correctness gaps ✅, service worker ✅. Done.
-4. **Phase D (15–18)** — admin tooling. Items 15 ✅ and 16 ✅; 17–18 remain.
+4. **Phase D (15–18)** — admin tooling. Items 15 ✅, 16 ✅ and 17 ✅; 18 remains.
 5. **Item 12 last**, against a frozen template.
 
 Item 12 splits: only the tab readers depend on the template's shape. Diff
@@ -778,9 +780,50 @@ npm test
 timeline already takes an instant, so it is a small addition, but nobody has run
 a real day through this yet — same reasoning as item 15's deferred filters.
 
-### 17. `[ ]` Undo / revert last change
+### 17. `[x]` Undo / revert last change
 
 The edit log records everything and can reverse nothing.
+
+**Done 2026-08-10** — four columns on `edit_log` (in `server/migrate.js`),
+`server/lib/undo.js`, three routes on `/api/admin/undo`, a rebuilt
+`LogPanel.tsx`, and 19 new tests (`tests/undo.test.js` plus two in
+`person-roles.test.js`, 236 total). Demonstrated in the browser against the real
+dev database: an 18-block shift undone from the panel, every block back where it
+started, and the refusal path appearing on its own.
+
+```bash
+npm test
+```
+
+- **The log now stores state, not just prose.** `before_json` is the block as it
+  stood; `after_version` is the `updated_at` it ended up with — deliberately the
+  same token item 14's guard uses. ⚠️ Parsing `change_summary` back into fields
+  was the obvious shortcut and would have failed silently the first time anyone
+  reworded a summary.
+- ⚠️ **Undo works on a batch, never on a row**, and the batch id is stamped by a
+  middleware on the admin router so that *one request is one batch*. That is
+  what makes it safe: every write a request makes shares the id, including the
+  irreversible ones. Deleting a person puts block-delete rows and a roster row
+  in the same batch, and the roster row is what makes undo refuse. Threading the
+  id per route would eventually miss one, and the miss would be silent —
+  restoring blocks for a person who no longer exists.
+- **All or nothing, checked before anything is written.** A block someone else
+  edited since refuses the whole batch and names it. Tested both ways: after a
+  refusal every other block is still where the shift left it.
+- **Imports are excluded on purpose.** An import owns its rows through
+  `source_key`, which `updateBlock` does not carry — a reverted import would
+  keep the file's ownership, show the old contents, and be re-applied by the
+  next poll. An undo that silently re-does itself is worse than no undo. Fix the
+  sheet and re-sync instead.
+- **The reversal goes through the ordinary mutations**, so it logs, broadcasts
+  to the right rooms, and bumps `target_versions` for free — and is itself a
+  batch, which is where redo comes from without a second mechanism.
+- **Pre-existing log rows are honest about it**: they carry no prior state, so
+  they read "No earlier version was recorded" rather than offering a button that
+  would guess.
+
+**Not built here:** undoing roster edits. People, teams and contacts still have
+no `updated_at` to check a restore against — item 14's residual, unchanged.
 
 ### 18. `[ ]` Event-wide announcements
 
@@ -804,7 +847,7 @@ authorization, negative cases explicit.
   script."*
 - **Done when:** CI runs green and the authorization negatives are covered.
 
-**Partly done already**, as a side effect of items 6–16. 217 tests in `tests/`:
+**Partly done already**, as a side effect of items 6–17. 236 tests in `tests/`:
 
 - ✅ Access-code authorization, negatives explicit (`authorization.test.js`,
   `admin-codes.test.js`) — the done-when above is met on that clause.
@@ -823,6 +866,8 @@ authorization, negative cases explicit.
   `ServiceWorkerGlobalScope` (`service-worker.test.js`).
 - ✅ "View as" fidelity, asserted against a real code-authenticated viewer
   session rather than against expectations (`view-as.test.js`).
+- ✅ Undo, weighted towards what it refuses — a batch edited since, a roster
+  delete, an import, a legacy row (`undo.test.js`).
 - ❌ **Import pipeline** — time parsing across the accepted formats, assignment
   resolution, diff classification. Untouched, and the biggest remaining gap.
 - ❌ **No CI script.** `npm test` is run by hand.
@@ -915,6 +960,7 @@ for "I lost my link" at the check-in desk.
 | ~~Late schema change forces rework~~ | Closed — model confirmed against past-year data, and applied in item 13 with a migration that runs on boot | 2, 3, 13 |
 | Real roster still not in hand | A people problem, not an engineering one — it was due at T-6 and is the likeliest thing to slip past the rehearsal | 24 |
 | Thundering herd on every change | Audience-scoped broadcasts ✅ — still to be confirmed under load | 11, 20 |
+| A wrong change made under pressure and no way back | Closed — one admin action is one log entry and undo reverts all of it, refusing rather than half-applying | 17 |
 | Total app failure during the event | Backups, monitoring, printed fallback | 23, 28 |
 
 ---
@@ -930,7 +976,7 @@ the two that actually catch problems.
 | ~~T-6 weeks~~ | ~~Phase A.~~ Done — but **real rosters are still not in hand**, and that is a people problem, not an engineering one. Chase it now; it is usually the long pole. |
 | ~~T-5~~ | ~~Phase B (access codes).~~ Done. |
 | T-4 | Phase C (reliability core) — items 9 ✅, 10 ✅, 11 ✅, 13 ✅ and 14 ✅ done; only item 12 remains, and it waits on the template. |
-| T-3 | Phase D + E (admin tooling, tests, load test) — items 15 ✅ and 16 ✅ done early. |
+| T-3 | Phase D + E (admin tooling, tests, load test) — items 15 ✅, 16 ✅ and 17 ✅ done early. |
 | T-2 | Phase F + item 21 (deploy, ops, devices). |
 | T-1 | Items 24–26. Dress rehearsal. |
 | Event week | Items 27–28. Freeze Wednesday. |

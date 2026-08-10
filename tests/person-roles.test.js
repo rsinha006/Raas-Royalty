@@ -48,6 +48,14 @@ legacy.exec(`
   );
   CREATE INDEX idx_people_role ON people(role_id);
 
+  -- The edit log as it shipped before item 17: prose, and nothing to reverse
+  -- it with. The four columns undo needs are added by migrate.js.
+  CREATE TABLE edit_log (
+    id TEXT PRIMARY KEY, schedule_block_id TEXT, edited_by TEXT NOT NULL,
+    source TEXT NOT NULL, timestamp TEXT NOT NULL, change_type TEXT NOT NULL,
+    change_summary TEXT NOT NULL, audience_json TEXT
+  );
+
   INSERT INTO roles (id,label,selector,sort_order,active) VALUES
     ('dancer','Dancer','team',1,1),
     ('judge','Judge','person',3,1),
@@ -58,6 +66,10 @@ legacy.exec(`
     ('p_amir','Amir Alpha','dancer','team_a'),
     ('p_bianca','Bianca Beta','dancer','team_b'),
     ('p_judge','Jordan Judge','judge',NULL);
+  INSERT INTO edit_log (id,schedule_block_id,edited_by,source,timestamp,change_type,change_summary)
+    VALUES
+      ('log_1','blk_1','Marcus','manual','2026-08-01T12:00:00.000Z','updated','Changed something'),
+      ('log_2',NULL,'Marcus','admin','2026-08-01T12:05:00.000Z','roster','Renamed a team');
 `);
 legacy.close();
 
@@ -203,6 +215,46 @@ describe('migrating a database that already has a roster', () => {
     const { runMigrations } = await import('../server/migrate.js');
     assert.deepEqual(runMigrations(db), [], 'a second run should be a no-op');
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM person_roles').get().n, 5);
+  });
+
+  /**
+   * Item 17 added four columns to a table `schema.sql` had already created, so
+   * this is the case that file cannot reach: an existing edit_log with rows in
+   * it.
+   */
+  test('the edit log gains the columns undo needs, without losing its rows', () => {
+    const columns = new Set(db.prepare('PRAGMA table_info(edit_log)').all().map((c) => c.name));
+    for (const column of ['before_json', 'after_version', 'batch_id', 'undone_at']) {
+      assert.ok(columns.has(column), `edit_log.${column} should exist`);
+    }
+    // The rows that were already there are still there, contents intact.
+    const legacyRows = db
+      .prepare("SELECT * FROM edit_log WHERE id IN ('log_1','log_2') ORDER BY id")
+      .all();
+    assert.equal(legacyRows.length, 2);
+    assert.equal(legacyRows[0].change_summary, 'Changed something');
+    assert.equal(legacyRows[0].before_json, null);
+  });
+
+  test('rows written before batching get their own batch, and are not undoable', async () => {
+    const { planUndo, listBatches } = await import('../server/lib/undo.js');
+
+    const rows = db
+      .prepare("SELECT id, batch_id FROM edit_log WHERE id IN ('log_1','log_2') ORDER BY id")
+      .all();
+    // Their own batch each: nothing recorded which of them were one action, and
+    // inventing a grouping would be a reconstruction of history rather than a
+    // reading of it.
+    assert.equal(new Set(rows.map((r) => r.batch_id)).size, 2);
+    assert.ok(rows.every((r) => r.batch_id));
+
+    // And none of them can be reversed, because nothing recorded what they
+    // overwrote — which is exactly what the null `before_json` says.
+    const batches = listBatches();
+    for (const row of rows) {
+      assert.equal(batches.find((b) => b.batchId === row.batch_id).canUndo, false);
+    }
+    assert.equal(planUndo(rows[0].batch_id).blockers[0].reason, 'no-state');
   });
 });
 

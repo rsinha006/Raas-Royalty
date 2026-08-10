@@ -818,3 +818,58 @@ admin. It would be maximally faithful, and it would mean the panel can mint a
 session for any subject — a much larger thing to get right than a read-only
 query, and it would put a second code-redemption path next to the one item 6
 locked down. It would also write `last_used_at` on codes nobody used.
+
+---
+
+## Undo reverts a batch, and refuses more than it accepts
+**Date:** 2026-08-10 · **Status:** decided
+
+**Question.** The edit log recorded every change and could reverse none of them.
+What does undo operate on, and what should it decline to touch?
+
+**Decision.** `edit_log` gains four columns — `before_json`, `after_version`,
+`batch_id`, `undone_at` — and undo replays a *batch* backwards through the
+ordinary mutations. One request is one batch, stamped by a middleware on the
+admin router. A batch is undoable only if every row in it is a reversible block
+change (or a summary line over rows that are), and only from the `manual` and
+`admin` sources. Every precondition is checked before anything is written; one
+failure refuses the whole batch.
+
+**Why.** Three things were load-bearing.
+
+**State, not prose.** `change_summary` reads `Changed "Team warm-up": time
+15:00–15:30 → 15:20–15:50`. Parsing that back into fields would work until
+someone reworded a summary and then fail quietly, which is the failure mode this
+project keeps designing against. `after_version` is the block's `updated_at` —
+deliberately the same token item 14's concurrency guard uses, so "has anyone
+touched this since" is one comparison and not a second concept.
+
+**A batch, never a row.** Item 15 goes out of its way to never leave half a day
+20 minutes from the other half, because that looks exactly like a correct
+schedule. Undo offered per log row would reintroduce it with one click. Stamping
+the batch id in middleware rather than per route is what makes this safe by
+construction: every write a request makes shares it, *including the ones that
+are not reversible*. Deleting a person writes block-delete rows and a roster row
+into the same batch, and the roster row is what makes undo refuse — restoring
+blocks that point at a person who no longer exists would be worse than not
+undoing. Threading the id by hand would eventually miss one, and the miss would
+be silent.
+
+**Imports are excluded, and not for lack of mechanism.** An import owns its rows
+through `source_key`, which `updateBlock` does not carry. A reverted import would
+keep the file's ownership while showing the old contents, and the next
+background poll would put it straight back — an undo that silently re-does
+itself a minute later. Reversing an import means fixing the sheet and
+re-syncing, which is what the one-pipeline design exists for. Roster imports go
+further: they delete people, which nothing logs.
+
+**The reversal goes through `createBlock` / `updateBlock` / `deleteBlock`** rather
+than writing SQL. So an undo logs, broadcasts to the right rooms, bumps
+`target_versions`, and honours the concurrency guard exactly as a hand edit does
+— and is itself a batch, which is where redo comes from without a second
+mechanism.
+
+**Rejected: undoing roster edits.** People, teams and contacts have no
+`updated_at`, so there is no version to check a restore against — item 14's
+residual, unchanged. A roster edit shows in the log with the reason it cannot be
+reversed rather than with a button that would race.

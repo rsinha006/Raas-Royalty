@@ -84,6 +84,37 @@ export function runMigrations(db) {
     if (!before) applied.push('captain role');
   }
 
+  /* ---- edit_log gains enough state to be reversible ---- */
+
+  /**
+   * The log recorded what happened in prose and could reverse none of it.
+   * `before_json` is the block as it stood; `after_version` is the `updated_at`
+   * it ended up with, which undo checks before touching anything so that a
+   * block someone has since edited refuses instead of being silently rolled
+   * back over. `batch_id` groups one admin action — a 17-block shift undone a
+   * row at a time is the half-shifted day item 15 exists to prevent.
+   *
+   * Existing rows keep NULLs and are simply not undoable, which is honest:
+   * nothing recorded what they overwrote. `backfillEditLogBatches` gives them
+   * batch ids anyway so the log still groups sensibly when read.
+   */
+  const logColumns = columnNames(db, 'edit_log');
+  for (const [column, type] of [
+    ['before_json', 'TEXT'],
+    ['after_version', 'TEXT'],
+    ['batch_id', 'TEXT'],
+    ['undone_at', 'TEXT'],
+  ]) {
+    if (!logColumns.has(column)) {
+      db.exec(`ALTER TABLE edit_log ADD COLUMN ${column} ${type}`);
+      applied.push(`edit_log.${column}`);
+    }
+  }
+
+  db.exec('CREATE INDEX IF NOT EXISTS idx_editlog_batch ON edit_log(batch_id)');
+
+  backfillEditLogBatches(db);
+
   /**
    * ---- target_versions — per-target "last updated" ----
    *
@@ -112,6 +143,24 @@ export function runMigrations(db) {
  * target whose real version has since moved on is never dragged backwards.
  * Exported because the seed has to do the same thing after writing its blocks.
  */
+/**
+ * Give pre-existing log rows a batch id so the log groups by action when read.
+ *
+ * Rows written before batching existed have no way to say which of them were
+ * one action, so the grouping is per row — each becomes its own batch. That is
+ * not a reconstruction of history and does not pretend to be: those rows carry
+ * no `before_json`, so undo will not offer them either way. This exists so the
+ * panel has one code path rather than two.
+ */
+function backfillEditLogBatches(db) {
+  const orphans = db.prepare('SELECT id FROM edit_log WHERE batch_id IS NULL').all();
+  if (!orphans.length) return;
+  const stamp = db.prepare('UPDATE edit_log SET batch_id = ? WHERE id = ?');
+  db.transaction(() => {
+    for (const row of orphans) stamp.run(`batch_legacy_${row.id}`, row.id);
+  })();
+}
+
 export function backfillTargetVersions(db) {
   // The floor a target with no row reads. Written once and never moved, so a
   // missed bump surfaces as a stuck timestamp rather than as a false "just

@@ -971,6 +971,37 @@ a {
   margin-bottom: 10px;
 }
 
+/* The change log's undo affordances. A batch that cannot be reversed says so
+   in the button's place — the sentence is more useful than a dead control. */
+.nowrap {
+  white-space: nowrap;
+}
+.linkish {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--gold);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+.is-undone {
+  text-decoration: line-through;
+  color: var(--text-faint);
+}
+.undo-why {
+  max-width: 16rem;
+  text-align: right;
+}
+.log-detail {
+  margin-top: 8px;
+  padding-left: 12px;
+  border-left: 2px solid var(--line-soft);
+  display: grid;
+  gap: 4px;
+  color: var(--text-dim);
+}
+
 /* ------------------------------ larger screens ------------------------------ */
 
 @media (min-width: 640px) {

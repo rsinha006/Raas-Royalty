@@ -21,7 +21,7 @@ otherwise the reasoning is lost between sessions and gets re-litigated.
 npm install && npm run seed && npm run build && npm start   # http://localhost:4000
 npm run dev          # hot reload: client :5173, API :4000
 npm run seed:reset   # rebuild placeholder data from scratch
-npm test             # 217 tests
+npm test             # 236 tests
 npm run codes -- --list   # every live access code and its subject
 ```
 
@@ -39,6 +39,7 @@ React/Vite bundle from `client/dist`. No external services.
 - `server/lib/mutations.js` — writes, all of which log to `edit_log`
 - `server/lib/time-shift.js` — the bulk "everything from 3pm moves 20 min"
 - `server/lib/view-as.js` — the admin preview of one subject's own schedule
+- `server/lib/undo.js` — reverting one admin action, or refusing to
 - `server/lib/viewer-auth.js` — code → session, re-checked on every request
 - `server/lib/live.js` — socket rooms, scoped broadcasts, the origin policy
 - `server/lib/event-time.js` — the venue timezone; wall-clock → instant
@@ -48,7 +49,7 @@ React/Vite bundle from `client/dist`. No external services.
 - `client/src/viewer/` — the participant app
 - `client/src/admin/` — the logistics panel
 
-Six things worth knowing before changing anything:
+Seven things worth knowing before changing anything:
 
 **Roles are data, not an enum, and a person holds a set of them.** Roles live in
 `person_roles`; captains hold `Dancer` + `Captain`. A role row's `selector`
@@ -97,18 +98,28 @@ Navigations are network-first so a redeploy reaches phones that already
 installed; `/s/:code` is network-only because serving it the shell is an
 infinite redirect. Tests cover each of these — don't relax them.
 
+**One request is one batch, and undo works on batches.** The admin router stamps
+`req.batchId` in middleware, and every `logEdit` and mutation `ctx` in that
+request carries it. That is deliberate: a request's *irreversible* writes land in
+the same batch as its reversible ones, so undo refuses a person-delete rather
+than restoring blocks for someone no longer on the roster. Don't thread batch ids
+per route, and don't offer undo per log row — item 15 exists to stop half a day
+sitting 20 minutes from the other half.
+
 Data model and spreadsheet templates are documented in [README.md](README.md).
 
 ## Current state
 
-Phase A (1–4), Phase B (5–8), and items 9, 10, 11, 13, 14, 15 and 16 are done — see
+Phase A (1–4), Phase B (5–8), and items 9, 10, 11, 13, 14, 15, 16 and 17 are
+done — see
 [PLAN.md](PLAN.md) for what each one settled. In short: the viewer is behind
 access codes enforced server-side, event times are resolved against the venue's
 timezone by the server, changes reach only the people they affect, each person's
 "last updated" is their own, concurrent admin edits are refused rather than
 silently merged, a whole afternoon can be pushed back in one previewed action,
 a reload with no signal still shows the last known schedule, an admin can see
-exactly what any one person sees, and 217 tests run under `npm test`.
+exactly what any one person sees, a change can be put back, and 236 tests run
+under `npm test`.
 
 Still not true: no deployment and no real data.
 

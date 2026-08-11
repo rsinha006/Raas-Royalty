@@ -14,13 +14,23 @@ python3 scripts/anonymize_samples.py && python3 scripts/verify_fixtures.py
 ```
 
 Needs `openpyxl` and a copy of `samples/`. The mapping is derived at runtime from
-a fixed seed and never written to disk, so the output is stable across runs but
-cannot be reversed into the originals. Anyone without `samples/` can still use
-the fixtures; they just can't rebuild them.
+a fixed seed and never written to disk, so the output is byte-identical across
+runs but cannot be reversed into the originals. Anyone without `samples/` can
+still use the fixtures; they just can't rebuild them.
 
-`verify_fixtures.py` is the gate. It fails if any real name, phone number, or
-piece of document metadata survived, and if the structure drifted. Run it before
-committing a regenerated fixture.
+**There are two gates, and they catch different things. Run both.**
+
+`verify_fixtures.py` fails if any real name, phone number, or piece of document
+metadata survived, and if the structure drifted.
+
+`npm test` fails if a fixture can no longer be opened by the reader the app
+actually uses (`tests/fixtures.test.js`). That is not a hypothetical: openpyxl
+saves a workbook Excel opens happily and exceljs cannot open at all — it writes
+absolute relationship targets and puts comments at `xl/comments/comment1.xml`
+where exceljs looks for `xl/comments1.xml` — so every fixture here was
+unreadable by the importer for a while, and the Python gate passed the whole
+time. `repack()` in the anonymizer rewrites the package into the layout Excel
+writes; the JS test is what says it still works.
 
 ## What's in here
 

@@ -30,7 +30,7 @@ process.env.EVENT_TIMEZONE = 'America/Indiana/Indianapolis';
 
 const { db } = await import('../server/db.js');
 const { parseTabular } = await import('../server/sync/parse.js');
-const { normalizeScheduleRows } = await import('../server/sync/normalize.js');
+const { normalizeRosterRows, normalizeScheduleRows } = await import('../server/sync/normalize.js');
 const { ingest } = await import('../server/sync/index.js');
 const { listAllBlocks } = await import('../server/lib/queries.js');
 
@@ -42,8 +42,10 @@ const files = fs
   .filter((f) => f.endsWith('.xlsx') && !f.startsWith('~$'))
   .sort();
 
-/** `{ name, rows }` for the ones that parse, `{ name, error }` for the ones that don't. */
+/** `{ name, buffer, headers, rows }` per workbook, read through the app's own reader. */
 const parsed = [];
+
+const ROSTER = 'Team Contact Information [FULL ROSTER].xlsx';
 
 /* ------------------------------- fixture ------------------------------- */
 
@@ -93,7 +95,9 @@ before(async () => {
     try {
       parsed.push({ name, buffer, ...(await parseTabular(buffer, name)) });
     } catch (err) {
-      parsed.push({ name, buffer, error: err });
+      // Caught rather than thrown, so the readability test below reports it as
+      // one clear failure instead of taking the whole file down in a hook.
+      parsed.push({ name, buffer, error: err, headers: [], rows: [] });
     }
   }
 });
@@ -113,51 +117,63 @@ describe('the committed fixtures', () => {
     assert.ok(fs.existsSync(path.join(FIXTURES, 'README.md')), 'the edge-case inventory is gone');
   });
 
-  test('each one either parses or refuses in a way an admin can act on', () => {
-    for (const f of parsed) {
-      if (!f.error) continue;
-      // Never a raw internal TypeError from a spreadsheet library — the admin
-      // uploading this has to know what to try next.
-      assert.match(
-        f.error.message,
-        /re-save it as \.xlsx or \.csv/i,
-        `${f.name} failed without a suggestion: ${f.error.message}`
-      );
-    }
-  });
-
-  test('at least one really is read, so the rest of this file has teeth', () => {
-    const readable = parsed.filter((f) => !f.error);
-    assert.ok(readable.length > 0, 'no fixture could be parsed at all');
-    // Rows, not an empty read that would make every assertion below vacuous.
-    assert.ok(
-      readable.some((f) => f.rows.length > 0),
-      'no fixture yielded any rows'
+  /**
+   * This is the regression guard for the repack pass in
+   * `scripts/anonymize_samples.py`. openpyxl writes a workbook Excel opens
+   * happily and exceljs cannot open at all — absolute relationship targets, and
+   * comments under `xl/comments/` rather than `xl/comments1.xml` — so for a
+   * while every one of these was unreadable by the app that has to read them.
+   * `verify_fixtures.py` cannot catch that: it is the reader that objects, and
+   * the reader is here.
+   */
+  test('every one of them opens in the reader the app actually uses', () => {
+    const broken = parsed.filter((f) => f.error);
+    assert.deepEqual(
+      broken.map((f) => `${f.name}: ${f.error.message}`),
+      [],
+      'regenerate with scripts/anonymize_samples.py — its repack pass is what makes these readable'
     );
   });
 
+  test('and they carry rows, not an empty read that would make this file vacuous', () => {
+    const withRows = parsed.filter((f) => f.rows.length > 0);
+    assert.ok(withRows.length >= 3, `only ${withRows.length} fixtures yielded rows`);
+  });
+
   /**
-   * Three of the four cannot be opened at the moment, and it is the fixtures
-   * that are wrong rather than the reader: the originals in `samples/` parse.
-   * `openpyxl` writes absolute relationship targets (`/xl/tables/table1.xml`)
-   * and puts comments under `xl/comments/`, and exceljs resolves neither.
-   * Recorded here rather than asserted as a fixed number, so repairing the
-   * anonymizer makes this test stronger instead of red.
+   * `fixtures/README.md` lists what each workbook exists to preserve, and
+   * `verify_fixtures.py` gates it in Python against `samples/`. These two check
+   * the same edge cases are still reachable *through the app's own reader*,
+   * which is the path item 12's parser will take — and they hold whether or not
+   * anyone has a copy of `samples/`.
    */
-  test('the ones that cannot be opened are a fixture-generation problem, not a data one', () => {
-    for (const f of parsed.filter((x) => x.error)) {
-      assert.ok(
-        fs.existsSync(path.join(FIXTURES, f.name)),
-        `${f.name} is missing, which is a different problem`
-      );
-    }
+  test('the messy roster the importer has to survive is still in there', () => {
+    const roster = parsed.find((f) => f.name === ROSTER);
+    assert.ok(roster, `${ROSTER} is missing`);
+    const cells = roster.rows.flatMap((r) => r.__cells);
+
+    // The `*` marks a food restriction, not a captain. Item 12 strips it.
+    assert.ok(
+      cells.some((c) => typeof c === 'string' && /\*$/.test(c.trim())),
+      'no asterisk-suffixed name survived'
+    );
+    // A phone stored as a number, which is how the parser gets 5558086135.
+    assert.ok(
+      cells.some((c) => typeof c === 'number' && c >= 1e9 && c < 1e10),
+      'no numeric-typed phone survived'
+    );
+    // Side tables past the last header column. A reader that takes "all columns
+    // until empty" eats these; a header-driven one does not.
+    assert.ok(
+      roster.rows.some((r) => r.__cells.length > roster.headers.length),
+      'no row runs past the headers'
+    );
   });
 });
 
 describe('uploading last year’s workbook', () => {
   test('none of them is mistaken for the schedule template', async () => {
     for (const f of parsed) {
-      if (f.error) continue;
       const { rows, errors } = normalizeScheduleRows(f.rows);
       assert.equal(rows.length, 0, `${f.name} produced ${rows.length} importable rows`);
       assert.equal(errors.length, f.rows.length, `${f.name} should report every row`);
@@ -165,13 +181,21 @@ describe('uploading last year’s workbook', () => {
     }
   });
 
+  test('nor for the roster template — a real roster is not a filled-in one', async () => {
+    // The roster fixture has First Name and Last Name in two columns, no Role
+    // column at all, and the team only in the sheet tab. It reads as 25 rows
+    // and none of them is importable, which is the point: assembling a roster
+    // out of this is content work, not a mapping.
+    const roster = parsed.find((f) => f.name === ROSTER);
+    const { rows, errors } = normalizeRosterRows(roster.rows);
+    assert.equal(rows.length, 0);
+    assert.equal(errors.length, roster.rows.length);
+    assert.match(errors[0].message, /Name is blank|is not a known role/);
+  });
+
   test('the preview says so without writing anything', async () => {
     const before = snapshot();
     for (const f of parsed) {
-      if (f.error) {
-        await assert.rejects(() => ingest(f.buffer, f.name, { dryRun: true }));
-        continue;
-      }
       const result = await ingest(f.buffer, f.name, { dryRun: true });
       // Either "no data rows" or a diff of nothing but errors; never a diff
       // that offers to apply something.
@@ -191,10 +215,6 @@ describe('uploading last year’s workbook', () => {
     assert.equal(before.length, 3);
 
     for (const f of parsed) {
-      if (f.error) {
-        await assert.rejects(() => ingest(f.buffer, f.name, { dryRun: false, removeMissing: true }));
-        continue;
-      }
       // removeMissing is the default, and a file that parses to zero valid rows
       // would otherwise mean "every managed block is missing — delete them".
       const result = await ingest(f.buffer, f.name, { dryRun: false, removeMissing: true });

@@ -39,7 +39,7 @@ competition weekend. **Read this at the start of every session.**
   undo reverts all of it or refuses and writes nothing.
 - **"Fire alarm, evacuate" is one block**, targeting everyone, reaching every
   session and every socket.
-- **334 tests run in CI**, covering authorization negatives, timezone and DST,
+- **335 tests run in CI**, covering authorization negatives, timezone and DST,
   code management, the schema migrations, broadcast scoping, the item 14
   correctness gaps, the bulk shift, the offline shell, preview fidelity,
   everything undo refuses, the announcement target, and the import pipeline —
@@ -884,7 +884,7 @@ to feed, and it is not in this plan.
 ## Phase E — Testing
 
 The draft had zero automated tests and was verified manually, once. It now has
-334, run in CI on every push.
+335, run in CI on every push.
 
 ### 19. `[x]` Build the automated test suite
 
@@ -898,7 +898,7 @@ authorization, negative cases explicit.
 - **Done when:** CI runs green and the authorization negatives are covered.
 
 Most of it was already done as a side effect of items 6–18; the import pipeline,
-the fixtures and CI are what this item added. 334 tests in `tests/`:
+the fixtures and CI are what this item added. 335 tests in `tests/`:
 
 - ✅ Access-code authorization, negatives explicit (`authorization.test.js`,
   `admin-codes.test.js`) — the done-when above is met on that clause.
@@ -925,10 +925,10 @@ the fixtures and CI are what this item added. 334 tests in `tests/`:
   resolution, diff classification (`import-pipeline.test.js`).
 - ✅ **CI** — `.github/workflows/ci.yml`, and `npm run ci` locally.
 - ✅ The `fixtures/` from item 4 now run through the real pipeline
-  (`fixtures.test.js`).
+  (`fixtures.test.js`) — which needed the fixtures repaired first; see below.
 
-**Done 2026-08-10** — 78 new tests (`import-pipeline.test.js`,
-`fixtures.test.js`), a CI workflow, and one fix the tests surfaced. 334 total.
+**Done 2026-08-10** — 79 new tests (`import-pipeline.test.js`,
+`fixtures.test.js`), a CI workflow, and two fixes the tests surfaced. 335 total.
 
 ```bash
 npm run ci     # the client typecheck and build, then the tests
@@ -963,20 +963,31 @@ npm run ci     # the client typecheck and build, then the tests
   saying to re-save the file. The routes already caught it, so this was never a
   500 — it was unactionable text on the one screen where the next step matters.
 
-**Found, not fixed — three of the four fixtures cannot be opened at all.** The
-originals in `samples/` parse; the anonymized copies do not, so this is
-`scripts/anonymize_samples.py`, not the importer. openpyxl writes absolute
-relationship targets (`/xl/tables/table1.xml` where Excel writes
-`../tables/table1.xml`) and puts comments under `xl/comments/comment1.xml`
-where exceljs looks for `xl/comments1.xml`; exceljs dereferences undefined on
-both. Rewriting the rels to relative in a post-save pass fixes two of the
-three — verified against a patched copy — and the third needs the comment parts
-moved or dropped. Two smaller defects in the same script: it `rmtree`s
-`fixtures/` before writing, which deletes the committed `fixtures/README.md`,
-and its output is not byte-stable across runs despite the fixed seed, so
-"regenerating doesn't churn the diff" is not true today. The fixture tests are
-written against the directory rather than a list, so repairing this makes them
-stronger rather than red. Worth an item of its own before item 24.
+**Also fixed — three of the four fixtures could not be opened at all**, which
+is what testing against them turned up first. The originals in `samples/` parse
+and the anonymized copies did not, so it was `scripts/anonymize_samples.py` and
+never the importer: **openpyxl saves a workbook Excel opens happily and exceljs
+cannot open**, because it writes absolute relationship targets
+(`/xl/tables/table1.xml` where Excel writes `../tables/table1.xml`) and puts
+comments at `xl/comments/comment1.xml` where exceljs looks for
+`xl/comments1.xml`. exceljs dereferences the part it looked for without
+checking, so it surfaced as a `TypeError` from inside a spreadsheet library.
+
+`repack()` now rewrites each saved workbook into the layout Excel writes —
+same parts, same bytes inside them, same order, so the structure checks in
+`verify_fixtures.py` still mean what they meant. All four now open, and the row
+counts match the originals exactly (0 / 4 / 13 / 25). Two smaller defects in the
+same script went with it: it `rmtree`d `fixtures/` before writing, taking the
+committed `fixtures/README.md` every time anyone regenerated, and its output was
+not byte-stable despite the fixed seed — openpyxl stamps every zip entry and
+`dcterms:modified` with the wall clock as it saves. Regenerating twice now
+produces identical bytes.
+
+⚠️ **The Python gate cannot catch this class of bug**, and passed throughout.
+It is the JS reader that objects, so `tests/fixtures.test.js` is where the
+regression guard lives — it fails with "regenerate with
+scripts/anonymize_samples.py" if a fixture stops opening. Run both gates after
+touching the anonymizer; `fixtures/README.md` says so.
 
 **Also not fixed:** the roster reader accepts a role by label or id but not by
 plural (`Judges` in a Role column is refused), while the assignment column

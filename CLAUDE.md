@@ -21,7 +21,7 @@ otherwise the reasoning is lost between sessions and gets re-litigated.
 npm install && npm run seed && npm run build && npm start   # http://localhost:4000
 npm run dev          # hot reload: client :5173, API :4000
 npm run seed:reset   # rebuild placeholder data from scratch
-npm test             # 334 tests
+npm test             # 335 tests
 npm run ci           # what CI runs: the client typecheck and build, then the tests
 npm run codes -- --list   # every live access code and its subject
 ```
@@ -132,7 +132,7 @@ silently merged, a whole afternoon can be pushed back in one previewed action,
 a reload with no signal still shows the last known schedule, an admin can see
 exactly what any one person sees, a change can be put back, "fire alarm,
 evacuate" is one block rather than six, an upload of the wrong spreadsheet is
-refused rather than half-applied, and 334 tests run in CI.
+refused rather than half-applied, and 335 tests run in CI.
 
 Still not true: no deployment and no real data.
 

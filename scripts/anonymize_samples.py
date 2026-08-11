@@ -33,9 +33,10 @@ edge case is worthless without them.
 
 from __future__ import annotations
 
+import posixpath
 import random
 import re
-import shutil
+import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -505,6 +506,115 @@ class Anonymizer:
         return v
 
 
+# --------------------------------------------------------------------------
+# Repack: make openpyxl's output readable by the app, and byte-stable
+# --------------------------------------------------------------------------
+#
+# openpyxl writes a valid .xlsx that Excel opens happily and that the app's
+# reader cannot open at all. Two differences from what Excel itself writes, and
+# exceljs (server/sync/parse.js) trips on both — it dereferences the part it
+# looked for without checking, so the failure surfaces as a TypeError from
+# inside a spreadsheet library rather than as anything about the file:
+#
+#   * relationship targets are absolute (`/xl/tables/table1.xml`) where Excel
+#     writes them relative to the part that owns them (`../tables/table1.xml`).
+#     exceljs keys its parsed parts by the relative form.
+#   * comments live at `xl/comments/comment1.xml` with the VML at
+#     `commentsDrawing1.vml`; exceljs only recognises `xl/comments1.xml` and
+#     `xl/drawings/vmlDrawing1.vml`.
+#
+# So the fixtures are rewritten into the layout Excel uses. Nothing about the
+# content changes — same parts, same bytes inside them, same order — which is
+# what keeps the structure checks in verify_fixtures.py meaningful.
+#
+# The same pass fixes the timestamps. openpyxl stamps each zip entry with the
+# time it ran, so two identical runs produced two different files and the
+# docstring's "byte-identical" was not true. Every entry is written at
+# FIXED_TIME instead, and now it is.
+
+REL_ELEMENT = re.compile(rb"<Relationship\b[^>]*?/>")
+REL_TARGET = re.compile(rb'Target="([^"]*)"')
+COMMENT_PART = re.compile(r"^xl/comments/comment(\d+)\.xml$")
+COMMENT_VML_PART = re.compile(r"^xl/drawings/commentsDrawing(\d+)\.vml$")
+MODIFIED = re.compile(rb"(<dcterms:modified[^>]*>)[^<]*(</dcterms:modified>)")
+
+
+def _rename_map(names: list[str]) -> dict[str, str]:
+    """openpyxl's part paths → the ones Excel writes, for the parts that differ."""
+    renames = {}
+    for name in names:
+        m = COMMENT_PART.match(name)
+        if m:
+            renames[name] = f"xl/comments{m.group(1)}.xml"
+            continue
+        m = COMMENT_VML_PART.match(name)
+        if m:
+            renames[name] = f"xl/drawings/vmlDrawing{m.group(1)}.vml"
+    return renames
+
+
+def _rewrite_rels(data: bytes, rels_path: str, renames: dict[str, str]) -> bytes:
+    """Resolve every target to its part, apply the renames, re-relativize.
+
+    A .rels file at `xl/worksheets/_rels/sheet1.xml.rels` describes
+    `xl/worksheets/sheet1.xml`, so its targets are relative to `xl/worksheets`.
+    """
+    base = posixpath.dirname(posixpath.dirname(rels_path))
+
+    def one(element: bytes) -> bytes:
+        if b'TargetMode="External"' in element:
+            return element  # a URL, not a part in this package
+
+        def target(m: re.Match) -> bytes:
+            raw = m.group(1).decode("utf-8")
+            part = raw[1:] if raw.startswith("/") else posixpath.normpath(
+                posixpath.join(base, raw)
+            )
+            part = renames.get(part, part)
+            rel = posixpath.relpath(part, base) if base else part
+            return f'Target="{rel}"'.encode("utf-8")
+
+        return REL_TARGET.sub(target, element)
+
+    return REL_ELEMENT.sub(lambda m: one(m.group(0)), data)
+
+
+def repack(path: Path) -> None:
+    """Rewrite a saved workbook in place. See the note above."""
+    with zipfile.ZipFile(path) as zin:
+        entries = [(item.filename, zin.read(item.filename)) for item in zin.infolist()]
+
+    renames = _rename_map([name for name, _ in entries])
+
+    out = []
+    for name, data in entries:
+        if name.endswith(".rels"):
+            data = _rewrite_rels(data, name, renames)
+        elif name == "[Content_Types].xml":
+            # Overrides name parts absolutely, with a leading slash.
+            for old, new in renames.items():
+                data = data.replace(
+                    f'PartName="/{old}"'.encode("utf-8"),
+                    f'PartName="/{new}"'.encode("utf-8"),
+                )
+        elif name == "docProps/core.xml":
+            # openpyxl stamps `modified` with the wall clock as it saves, which
+            # overwrites the fixed value set on the workbook a line earlier.
+            data = MODIFIED.sub(
+                rb"\g<1>" + FIXED_TIME.strftime("%Y-%m-%dT%H:%M:%SZ").encode() + rb"\g<2>",
+                data,
+            )
+        out.append((renames.get(name, name), data))
+
+    stamp = FIXED_TIME.timetuple()[:6]
+    with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as zout:
+        for name, data in out:
+            info = zipfile.ZipInfo(name, date_time=stamp)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.create_system = 0  # not "whichever OS regenerated it"
+            zout.writestr(info, data)
+
+
 def main():
     if not SAMPLES.is_dir():
         raise SystemExit(f"no samples/ directory at {SAMPLES}")
@@ -518,9 +628,12 @@ def main():
     anon = Anonymizer()
     anon.harvest(books)
 
-    if FIXTURES.exists():
-        shutil.rmtree(FIXTURES)
-    FIXTURES.mkdir()
+    # Clear the workbooks and nothing else. This used to rmtree the directory,
+    # which took fixtures/README.md — the committed inventory of what each
+    # fixture's edge cases are — with it every time anyone regenerated.
+    FIXTURES.mkdir(exist_ok=True)
+    for stale in FIXTURES.glob("*.xlsx"):
+        stale.unlink()
 
     report = []
     for name, wb in books.items():
@@ -546,6 +659,8 @@ def main():
         # like "Team" if one ever collided with a surname.
         out = FIXTURES / name
         wb.save(out)
+        # Into the part layout Excel writes, so the app's reader can open it.
+        repack(out)
         report.append((out.name, cells))
 
     print(f"{len(anon.first_map)} first names, {len(anon.last_map)} surnames, "

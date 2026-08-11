@@ -44,6 +44,13 @@ npm run ci      # what CI runs: the client typecheck and build, then the tests
 on Node 20 and 22. Each test file builds its own throwaway database, so they
 never touch `data/`.
 
+⚠️ The test script's glob is **unquoted on purpose** — `tests/*.test.js`, expanded
+by the shell. Quoting it hands the pattern to `node --test`, which only learned
+to expand globs in Node 21, so a quoted pattern passes on a modern local Node
+and fails on the Node 20 in the matrix with "Could not find". The cost is that
+tests must stay flat in `tests/`; a nested one would be skipped silently rather
+than failing.
+
 ### Load test
 
 ```bash

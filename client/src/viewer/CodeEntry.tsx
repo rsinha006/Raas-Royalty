@@ -67,8 +67,10 @@ export default function CodeEntry({
   };
 
   return (
-    <div className="landing">
-      <div className="crown">♛</div>
+    <div className="landing" role="main">
+      <div className="crown" aria-hidden="true">
+        ♛
+      </div>
       <h1>{eventName}</h1>
       <p className="landing-sub">
         Your schedule is private to you. Open the link you were sent, or enter your
@@ -112,7 +114,12 @@ export default function CodeEntry({
           aria-describedby="code-hint"
           disabled={busy}
         />
-        <p id="code-hint" className="tiny faint" style={{ marginTop: -4 }}>
+        {/* aria-describedby alone reads this once, when the field takes focus.
+            The text then swaps to the character count on a short submit, and
+            nothing would announce that — so the same element is a live region
+            too, which is what turns a silently rejected submit into a spoken
+            "that's 5 of 8 characters." */}
+        <p id="code-hint" className="tiny faint" style={{ marginTop: -4 }} aria-live="polite">
           {tooShort
             ? `That's ${normalized.length} of ${CODE_LENGTH} characters.`
             : `${CODE_LENGTH} characters, from your link or the check-in desk.`}

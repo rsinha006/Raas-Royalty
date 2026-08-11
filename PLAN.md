@@ -14,7 +14,8 @@ competition weekend. **Read this at the start of every session.**
 ## Where things stand
 
 **Done: Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13,
-14, 19 and 20.** Last updated 2026-08-10.
+14, 19 and 20. Item 21 is half done** — the accessibility and responsive pass
+has landed; its hardware checks are open. Last updated 2026-08-11.
 
 - The viewer is **behind access codes**, enforced server-side, with the roster
   no longer enumerable. Codes are managed and exported from the admin panel.
@@ -39,12 +40,16 @@ competition weekend. **Read this at the start of every session.**
   undo reverts all of it or refuses and writes nothing.
 - **"Fire alarm, evacuate" is one block**, targeting everyone, reaching every
   session and every socket.
-- **338 tests run in CI**, covering authorization negatives, timezone and DST,
+- **353 tests run in CI**, covering authorization negatives, timezone and DST,
   code management, the schema migrations, broadcast scoping, the item 14
   correctness gaps, the bulk shift, the offline shell, preview fidelity,
-  everything undo refuses, the announcement target, and the import pipeline —
-  including last year's real spreadsheets, which the importer has to refuse
-  without moving the schedule.
+  everything undo refuses, the announcement target, the measured colour
+  contrast, and the import pipeline — including last year's real spreadsheets,
+  which the importer has to refuse without moving the schedule.
+- **The app is usable by someone who cannot see it.** Headings, landmarks and a
+  real list where there were only `div`s; every colour measured against AA
+  rather than eyeballed; one keyboard tab pattern instead of four broken ones;
+  live changes announced. See [docs/device-matrix.md](docs/device-matrix.md).
 - **600 phones have been measured, not assumed.** The worst change the product
   can make — an announcement to everyone — reaches all 600 in ~140 ms with no
   errors, and the personalized schedule is 3.7× cheaper than it was before the
@@ -54,7 +59,9 @@ The open decisions are all resolved (see below); item 12 was reshaped by them.
 
 **Not yet true of this project:** no deployment and no real data.
 
-**Next up: item 21 (devices and accessibility), then Phase F (deploy and ops).**
+**Next up: Phase F (deploy and ops).** Item 21's remaining half needs phones in
+hands, not code — run [docs/device-matrix.md](docs/device-matrix.md) before the
+dress rehearsal.
 
 ### Build order
 
@@ -1052,7 +1059,7 @@ debounce. **Zero errors in every scenario, twice.**
 **Not covered:** real network, TLS, a proxy, or mobile radios — venue wifi will
 dominate every number here, and that is items 21 and 26. Nor a day-long soak.
 
-### 21. `[ ]` Device matrix and accessibility pass
+### 21. `[~]` Device matrix and accessibility pass
 
 Real iOS Safari and Android hardware — the in-app browser is not a substitute.
 Check safe-area insets, `tel:`/`sms:` actually dialling, socket survival across
@@ -1061,6 +1068,66 @@ screen reader labels.
 
 - Claude can do the accessibility audit and responsive checks; physical device
   and battery testing is yours.
+
+**Accessibility and responsive half done 2026-08-11** — the palette, the
+semantics and the ARIA, plus 15 tests (`tests/accessibility.test.js`, 353
+total). **The hardware half is open**, as a dated checklist in
+[docs/device-matrix.md](docs/device-matrix.md) with the full audit beside it.
+
+```bash
+npm test
+```
+
+- **The palette was measured, and three things were failing.** `--text-faint`
+  is used at 11–13px and sat at 3.6–4.3:1 — under AA on every surface it lands
+  on. Control boundaries were `--line` at **1.4:1**, so the code-entry field,
+  which paints the page colour, was distinguishable from the page by nothing at
+  all. And there was no app-wide focus ring: `.input` referenced
+  `var(--accent)`, ⚠️ **a custom property that was never declared anywhere**, so
+  it had been painting a violet outside the palette for as long as nobody
+  looked. There is now a test that fails on any `var()` with no declaration and
+  no fallback.
+- ⚠️ **A finished block is no longer faded with `opacity`, and cannot go back
+  to it** — there is a test. Element opacity fades the text and the card it is
+  measured against *together*, so no colour choice rescues the ratio: a sweep
+  put the end time at 1.7:1 at `.45` and still under AA at `.8`. A past block
+  is content people scroll back to, not inactive chrome, so the WCAG exemption
+  does not cover it. It recedes by dropping its raised fill instead.
+- **The schedule screen had no headings at all** — every one was a `div`, so
+  there was nothing to navigate by and no `<main>`. It now reads `banner → h1
+  subject → main → h2 now/next → h2 full schedule → tabpanel → list of blocks →
+  h2 contact`, and the blocks are a real list rather than an unbroken run of
+  text with no boundaries in it.
+- ⚠️ **Four tab strips promised a keyboard pattern none of them implemented**,
+  which is worse than plain buttons: the role tells a screen reader that arrow
+  keys move between tabs, and they did nothing. Two of the four put
+  `aria-selected` on a plain button, which is not valid ARIA at all. All four
+  now come from one implementation (`client/src/tabstrip.ts`) — don't add a
+  fifth by hand.
+- **Live changes are announced.** The offline and "your schedule just changed"
+  banners are `role="status"`, so a change that arrives while nobody is looking
+  reaches someone listening. And focus follows the screen: signing in, picking
+  a name and stepping back all move it to the new heading, rather than dropping
+  it on `<body>` where the next Tab restarts at the address bar.
+- **`env(safe-area-inset-left/right)` was never used**, though
+  `viewport-fit=cover` is set — which is precisely the pair that clips text
+  under the notch in landscape. Now on all four gutters. ⚠️ Untestable here:
+  the insets resolve to `0px` in every desktop browser, so this fix is
+  unexercised until it runs on a notched phone. It is the first item on the
+  hardware checklist.
+
+**Still open — hardware only.** Safe-area insets on a real notch, `tel:`/`sms:`
+reaching a dialler, socket survival across lock/wake at 5 minutes and 2 hours,
+battery over a full day, VoiceOver and TalkBack, and one open question:
+`overscroll-behavior-y: contain` on `body` **disables pull-to-refresh on
+Android Chrome**, which contradicts item 10's premise that refreshing is what
+people do when a screen looks stale. The one-word fix is written down; it was
+not guessed at without a device.
+
+**Deliberately not done:** converting the stylesheet from `px` to `rem`. Browser
+zoom works, so this is not a 1.4.4 failure, but the OS text-size setting does
+not scale the app on Android. A wide, risky change to make before a freeze —
+after the retro, not now.
 
 ---
 
@@ -1131,6 +1198,7 @@ for "I lost my link" at the check-in desk.
 | ~~Thundering herd on every change~~ | Closed — one team's edit wakes 66 of 600 phones, and even an announcement to all 600 settles in ~140ms with no errors | 11, 20 |
 | A wrong change made under pressure and no way back | Closed — one admin action is one log entry and undo reverts all of it, refusing rather than half-applying | 17 |
 | Total app failure during the event | Backups, monitoring, printed fallback | 23, 28 |
+| Unreadable on a real phone in a dark venue | Half closed — every colour is measured against AA and pinned by tests, and the screen is navigable by heading and by keyboard. The notch, the radio and the battery still need hardware | 21 |
 
 ---
 
@@ -1145,8 +1213,8 @@ the two that actually catch problems.
 | ~~T-6 weeks~~ | ~~Phase A.~~ Done — but **real rosters are still not in hand**, and that is a people problem, not an engineering one. Chase it now; it is usually the long pole. |
 | ~~T-5~~ | ~~Phase B (access codes).~~ Done. |
 | T-4 | Phase C (reliability core) — items 9 ✅, 10 ✅, 11 ✅, 13 ✅ and 14 ✅ done; only item 12 remains, and it waits on the template. |
-| T-3 | Phase D + E (admin tooling, tests, load test) — Phase D ✅, item 19 ✅ and item 20 ✅ done early; item 21 remains. |
-| T-2 | Phase F + item 21 (deploy, ops, devices). |
+| T-3 | Phase D + E (admin tooling, tests, load test) — Phase D ✅, item 19 ✅ and item 20 ✅ done early; item 21's audit ✅. |
+| T-2 | Phase F (deploy, ops) + item 21's device checks on real phones. |
 | T-1 | Items 24–26. Dress rehearsal. |
 | Event week | Items 27–28. Freeze Wednesday. |
 | After | Retro. Export the edit log to see what actually changed and how often. |

@@ -21,7 +21,7 @@ otherwise the reasoning is lost between sessions and gets re-litigated.
 npm install && npm run seed && npm run build && npm start   # http://localhost:4000
 npm run dev          # hot reload: client :5173, API :4000
 npm run seed:reset   # rebuild placeholder data from scratch
-npm test             # 338 tests
+npm test             # 353 tests
 npm run ci           # what CI runs: the client typecheck and build, then the tests
 npm run codes -- --list   # every live access code and its subject
 npm run load-test         # 600 virtual phones against an isolated fixture DB
@@ -48,10 +48,11 @@ React/Vite bundle from `client/dist`. No external services.
 - `server/db.js` — `target_versions`: per-subject "last updated"
 - `server/sync/` — the import pipeline
 - `client/sw.js` — the offline shell, emitted by `client/vite-plugin-sw.js`
+- `client/src/tabstrip.ts` — the one ARIA tabs implementation, used by all four
 - `client/src/viewer/` — the participant app
 - `client/src/admin/` — the logistics panel
 
-Eight things worth knowing before changing anything:
+Nine things worth knowing before changing anything:
 
 **Block targets are four-way, and the fourth is not like the others.** A block
 targets a team, a person, a role, or `everyone` — the announcement audience,
@@ -129,12 +130,26 @@ they took `getPersonalizedSchedule` from 388µs to 105µs; measured numbers are 
 [docs/load-test.md](docs/load-test.md). ⚠️ Adding an `Intl` construction, or a
 `db.prepare` of assembled SQL, back into this path costs every phone at once.
 
+**The palette is measured, and the measurements are tests.** Every text colour
+clears WCAG AA against every surface it is painted on, and every *control*
+boundary clears 3:1 — which is why there are two border variables: `--line` and
+`--line-soft` are decorative card edges, `--line-strong` is the boundary of
+anything tappable or typable. `tests/accessibility.test.js` parses the shipped
+stylesheet and fails on the ratio, so a colour tweak that drops below the floor
+is caught with the number it landed on. ⚠️ Two traps it guards, both of which
+were real: `.block.is-past` must not fade itself with `opacity` — element
+opacity fades text and the card it is measured against together, so no colour
+choice can rescue it — and a `var(--x)` with no declaration and no fallback is
+a silent wrong colour, which is what `var(--accent)` was. The full audit and
+the open hardware checks are in [docs/device-matrix.md](docs/device-matrix.md).
+
 Data model and spreadsheet templates are documented in [README.md](README.md).
 
 ## Current state
 
 Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13, 14, 19
-and 20 are done — see
+and 20 are done; item 21's accessibility half is done and its hardware half is a
+checklist in [docs/device-matrix.md](docs/device-matrix.md) — see
 [PLAN.md](PLAN.md) for what each one settled. In short: the viewer is behind
 access codes enforced server-side, event times are resolved against the venue's
 timezone by the server, changes reach only the people they affect, each person's
@@ -144,7 +159,8 @@ a reload with no signal still shows the last known schedule, an admin can see
 exactly what any one person sees, a change can be put back, "fire alarm,
 evacuate" is one block rather than six, an upload of the wrong spreadsheet is
 refused rather than half-applied, 600 concurrent phones have been measured
-rather than assumed, and 338 tests run in CI.
+rather than assumed, the screen is navigable by heading, by keyboard and by
+screen reader with every colour measured against AA, and 353 tests run in CI.
 
 Still not true: no deployment and no real data.
 

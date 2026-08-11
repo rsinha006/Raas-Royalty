@@ -2,10 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, ApiError } from '../api';
 import { eventNow, eventZoneAbbreviation } from '../clock';
 import { buildTimeline, formatDayDate, formatTimestamp, nextGroup } from '../time';
+import { useTabStrip } from '../tabstrip';
 import type { SchedulePayload, TargetType, TeamMember } from '../types';
 import BlockCard from '../viewer/BlockCard';
 import ContactCard from '../viewer/ContactCard';
 import NowNext from '../viewer/NowNext';
+import Loading from '../Loading';
 
 /**
  * "View as" — item 16.
@@ -112,6 +114,11 @@ export default function ViewAsPanel() {
   const activeDay = day ?? timeline.activeDay ?? days[0]?.key ?? null;
   const dayBlocks = blocks.filter((b) => b.day === activeDay);
   const zoneLabel = eventZoneAbbreviation();
+  const { tablistProps, tabProps } = useTabStrip(
+    days.map((d) => d.key),
+    activeDay,
+    setDay,
+  );
 
   return (
     <div className="stack">
@@ -147,11 +154,7 @@ export default function ViewAsPanel() {
       </div>
 
       {error && <div className="banner offline">{error}</div>}
-      {busy && !preview && (
-        <div className="loading-screen">
-          <span className="spinner" />
-        </div>
-      )}
+      {busy && !preview && <Loading label="Loading their schedule…" />}
 
       {preview && schedule && (
         <>
@@ -228,15 +231,9 @@ export default function ViewAsPanel() {
           <div className="viewer-frame">
             <NowNext timeline={timeline} nextBlocks={upcoming} days={days} at={at} />
 
-            <div className="daytabs" role="tablist" aria-label="Day">
+            <div className="daytabs" aria-label="Day" {...tablistProps}>
               {days.map((d) => (
-                <button
-                  key={d.key}
-                  role="tab"
-                  className="daytab"
-                  aria-selected={activeDay === d.key}
-                  onClick={() => setDay(d.key)}
-                >
+                <button key={d.key} className="daytab" {...tabProps(d.key)}>
                   {d.label}
                   <span className="daytab-date">{formatDayDate(d)}</span>
                 </button>
@@ -244,7 +241,10 @@ export default function ViewAsPanel() {
             </div>
 
             {dayBlocks.length ? (
-              <div className="stack">
+              // A list, matching the viewer — BlockCard is an <li>, and the
+              // point of this panel is that it renders the participant's own
+              // components rather than a lookalike.
+              <ul className="stack plainlist">
                 {dayBlocks.map((b) => (
                   <BlockCard
                     key={b.id}
@@ -253,7 +253,7 @@ export default function ViewAsPanel() {
                     changed={false}
                   />
                 ))}
-              </div>
+              </ul>
             ) : (
               <div className="empty-day">Nothing scheduled for them on this day.</div>
             )}

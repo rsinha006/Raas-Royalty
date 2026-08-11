@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { formatDateTime } from '../time';
 import type { TemplateColumn } from '../types';
+import Loading from '../Loading';
 
 interface OverviewData {
   counts: Record<string, number>;
@@ -41,7 +42,7 @@ export default function Overview({
     api.get<OverviewData>('/api/admin/overview').then(setData).catch(() => setData(null));
   }, []);
 
-  if (!data) return <div className="loading-screen"><span className="spinner" /></div>;
+  if (!data) return <Loading label="Loading the overview…" />;
 
   return (
     <>

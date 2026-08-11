@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import { formatDateTime } from '../time';
+import Loading from '../Loading';
 
 /**
  * Access-code management — item 8.
@@ -102,9 +103,7 @@ export default function CodesPanel() {
     return error ? (
       <div className="banner offline">{error}</div>
     ) : (
-      <div className="loading-screen">
-        <span className="spinner" />
-      </div>
+      <Loading label="Loading access codes…" />
     );
   }
 

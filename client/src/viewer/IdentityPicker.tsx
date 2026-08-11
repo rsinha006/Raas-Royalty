@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../api';
 import type { TeamMember } from '../types';
+import Loading from '../Loading';
 
 /**
  * "Which dancer are you?", shown once after a team code is redeemed.
@@ -61,7 +62,7 @@ export default function IdentityPicker({
 
   if (error && !people) {
     return (
-      <div className="landing">
+      <div className="landing" role="main">
         <h1 style={{ fontSize: 24 }}>{teamName}</h1>
         <p className="landing-sub">{error}</p>
         <button className="btn primary block-w" onClick={() => window.location.reload()}>
@@ -74,18 +75,17 @@ export default function IdentityPicker({
     );
   }
 
-  if (!people) {
-    return (
-      <div className="loading-screen">
-        <span className="spinner" />
-        <span>Loading your team…</span>
-      </div>
-    );
-  }
+  if (!people) return <Loading label="Loading your team…" visible />;
 
   return (
-    <div className="landing" style={{ justifyContent: 'flex-start', paddingTop: 32 }}>
-      <div className="crown">♛</div>
+    <div
+      className="landing"
+      role="main"
+      style={{ justifyContent: 'flex-start', paddingTop: 32 }}
+    >
+      <div className="crown" aria-hidden="true">
+        ♛
+      </div>
       <h1 style={{ fontSize: 26 }}>{teamName}</h1>
       <p className="landing-sub">
         Which one are you? Some things — airport pickups, captain meetings — are
@@ -112,20 +112,31 @@ export default function IdentityPicker({
         </p>
       )}
 
-      <div className="stack" style={{ width: '100%', marginTop: 8 }}>
+      {/* Typing in the filter changes a list nobody is looking at while they
+          type. The count is the only feedback that the name is in there. */}
+      {filter.trim() !== '' && (
+        <p className="vh" role="status">
+          {shown.length === 1 ? '1 name matches' : `${shown.length} names match`}
+        </p>
+      )}
+
+      <ul className="stack plainlist" style={{ width: '100%', marginTop: 8 }}>
         {shown.map((p) => (
-          <button
-            key={p.id}
-            className="btn block-w"
-            onClick={() => pick(p.id)}
-            disabled={picking !== null}
-            style={{ justifyContent: 'flex-start' }}
-          >
-            {picking === p.id ? 'Opening…' : p.name}
-          </button>
+          <li key={p.id}>
+            <button
+              className="btn block-w"
+              onClick={() => pick(p.id)}
+              disabled={picking !== null}
+              // A column of 25 names reads down its left edge, not its centre.
+              // (This was `justifyContent`, which a non-flex button ignores.)
+              style={{ textAlign: 'left' }}
+            >
+              {picking === p.id ? 'Opening…' : p.name}
+            </button>
+          </li>
         ))}
-        {!shown.length && <div className="empty-day">No names match “{filter}”.</div>}
-      </div>
+      </ul>
+      {!shown.length && <div className="empty-day">No names match “{filter}”.</div>}
 
       <button className="btn ghost block-w" onClick={onUseDifferentCode} style={{ marginTop: 20 }}>
         Use a different code

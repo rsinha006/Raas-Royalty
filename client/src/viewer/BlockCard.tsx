@@ -21,7 +21,7 @@ export default function BlockCard({
     .join(' ');
 
   return (
-    <div className={cls}>
+    <li className={cls}>
       <div className="block-time">
         {formatTime(block.startTime)}
         <span className="end">to {formatTime(block.endTime)}</span>
@@ -29,6 +29,10 @@ export default function BlockCard({
       <div>
         <div className="block-activity">
           {block.activity}{' '}
+          {/* "Already happened" is otherwise carried by the card's greyed
+              treatment alone, which is nothing at all if the schedule is
+              being read aloud rather than looked at. */}
+          {status === 'past' && <span className="vh">Finished. </span>}
           {status === 'now' && <span className="badge now">Now</span>}
           {changed && status !== 'now' && <span className="badge changed">Changed</span>}
           {/* Whose item is this? Every other block on the screen is here
@@ -53,6 +57,6 @@ export default function BlockCard({
         )}
         {block.notes && <div className="block-note">{block.notes}</div>}
       </div>
-    </div>
+    </li>
   );
 }

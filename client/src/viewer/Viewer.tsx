@@ -14,6 +14,7 @@ import CodeEntry from './CodeEntry';
 import IdentityPicker from './IdentityPicker';
 import LinkNotice from './LinkNotice';
 import ScheduleScreen from './ScheduleScreen';
+import Loading from '../Loading';
 
 /**
  * Four states, in the order someone meets them:
@@ -59,6 +60,44 @@ export default function Viewer() {
   const [deadLink, setDeadLink] = useState<SignInReason | null>(null);
   const [busy, setBusy] = useState(false);
   const [eventName, setEventName] = useState('Royalty');
+
+  /**
+   * Focus after a screen change.
+   *
+   * There is no router here, so moving from the code screen to the identity
+   * step to the schedule replaces the whole tree without a navigation — and a
+   * browser only resets focus on a navigation. Without this, focus stays on
+   * whatever button just unmounted, which means `body`: the next Tab starts
+   * over at the address bar, and a screen reader is left reading the old
+   * screen's last utterance. The first settle is skipped, because stealing
+   * focus on the initial paint is a bug of its own.
+   */
+  const settled = useRef(false);
+  useEffect(() => {
+    if (phase === 'checking') return;
+    if (!settled.current) {
+      settled.current = true;
+      return;
+    }
+    // The new screen usually paints its loading state first, which has no
+    // heading yet, so look again a few times rather than once. Timers rather
+    // than rAF: rAF is paused while the document is hidden, which is exactly
+    // the phone-coming-back-from-lock case this app lives in.
+    //
+    // Bounded at ~350ms on purpose. Past that the request is slow, the
+    // loader's role="status" has already said so, and pulling focus onto a
+    // heading that lands seconds later is the worse bug.
+    const timers: number[] = [];
+    const tryFocus = () => {
+      const h1 = document.querySelector<HTMLElement>('h1');
+      if (!h1 || h1 === document.activeElement) return;
+      h1.tabIndex = -1;
+      h1.focus({ preventScroll: true });
+    };
+    tryFocus();
+    for (const ms of [50, 150, 350]) timers.push(window.setTimeout(tryFocus, ms));
+    return () => timers.forEach(clearTimeout);
+  }, [phase]);
 
   /**
    * The URL's reason, kept where `checkSession` can consume it. State alone
@@ -188,12 +227,7 @@ export default function Viewer() {
   }, [applySession, signOut]);
 
   if (phase === 'checking') {
-    return (
-      <div className="loading-screen">
-        <span className="spinner" />
-        <span>Loading…</span>
-      </div>
-    );
+    return <Loading label="Loading…" visible />;
   }
 
   if (phase === 'signed-out') {
@@ -206,7 +240,16 @@ export default function Viewer() {
     <LinkNotice
       reason={deadLink}
       subjectName={session?.subject?.name ?? null}
-      onDismiss={() => setDeadLink(null)}
+      onDismiss={() => {
+        setDeadLink(null);
+        // "Got it" removes the element focus is sitting on. Same problem as
+        // the phase change above, one control smaller.
+        const h1 = document.querySelector<HTMLElement>('h1');
+        if (h1) {
+          h1.tabIndex = -1;
+          h1.focus({ preventScroll: true });
+        }
+      }}
     />
   ) : null;
 

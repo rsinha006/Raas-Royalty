@@ -979,3 +979,114 @@ of websocket upgrades need socket.io's retry; that is invisible to the user and
 self-healing, which is the better of the two failures. It is an env var
 (`KEEP_ALIVE_TIMEOUT_MS`) because a proxy with a shorter idle timeout would need
 it lower — set it at deploy, item 22.
+
+## A "past" block is dimmed by its surface, never by opacity
+**Date:** 2026-08-11 · **Status:** decided
+
+**Question.** Finished blocks were `opacity: 0.45`, which put their end time at
+1.7:1 and their location at 2.4:1 against the card behind them — well under AA.
+Raise the opacity, pick better colours, or stop using opacity?
+
+**Decision.** Stop using opacity. `.block.is-past` now drops its raised fill
+back to the page colour and dims its heading to `--text-dim`; nothing on the
+card falls below 6:1.
+
+**Why.** Better colours cannot fix it, and that is the whole point: element
+opacity fades the text *and* the background it is measured against together, so
+the ratio between them degrades no matter what either one is. A sweep confirmed
+it — even at 0.8 the faintest text was still 4.29:1, and 0.8 does not read as
+faded. The only way out is to not fade the element.
+
+Which leaves whether it needs fixing at all, since WCAG exempts "inactive user
+interface components". A past block is not inactive UI — it is content people
+scroll back to all day ("what time was the tech run?", "where were team photos
+again?"). The exemption does not cover it. Dropping the fill recedes the card
+just as well, because the contrast that carries "this is done" is the card
+against the *page*, not the text against the card.
+
+Same reasoning, smaller: `.btn:disabled` went from 0.45 to 0.7. A disabled
+control genuinely is exempt, but "Show my schedule" is the primary action on the
+sign-in screen and spends most of its life disabled, with its own label at 2.9:1
+against its own fill — a check-in desk in a dark venue squinting at the button
+they are meant to press.
+
+## Two border colours: decorative edges and control boundaries
+**Date:** 2026-08-11 · **Status:** decided
+
+**Question.** `--line` (1.4:1 against the page) was the border on card edges
+*and* on every input, button and tappable row. WCAG 1.4.11 wants 3:1 for the
+boundary of a control. Raise `--line`, or split it?
+
+**Decision.** Split. `--line` and `--line-soft` stay exactly as they were and
+keep their card edges; a new `--line-strong` (`#716789`, ≥3.2:1 on every
+surface) carries anything tappable or typable.
+
+**Why.** Raising `--line` would have lit up every card boundary in the app to
+fix a rule that does not apply to them — 1.4.11 is about identifying
+*components*, and a schedule card is not one. The failure was specific and
+severe: `.input` paints `--bg`, the same colour as the page, with a 1.4:1
+border, so the code-entry field was distinguishable from the background by
+nothing at all. `.btn.ghost` was worse — transparent fill, invisible edge, a
+button that exists only as floating text.
+
+The split is worth the second variable because it encodes the distinction that
+was missing. `tests/accessibility.test.js` asserts `--line-strong` clears 3:1
+**and that `--line` does not**, so "these look the same, use one" fails loudly
+rather than quietly undoing this.
+
+## A half-implemented ARIA pattern is worse than none
+**Date:** 2026-08-11 · **Status:** decided
+
+**Question.** Four tab strips (viewer days, admin panel, roster sections,
+schedule days) declared `role="tab"` — or, in two cases, `aria-selected` with no
+role at all — and none implemented the keyboard behaviour those roles promise.
+Fix all four, drop the roles for plain buttons, or leave it?
+
+**Decision.** Fix all four, from one implementation:
+[`client/src/tabstrip.ts`](../client/src/tabstrip.ts). One tab stop per strip,
+arrow keys with wrap, Home/End, selection following focus.
+
+**Why.** The roles are not decoration — they are a contract. A screen reader
+announces "tab, 2 of 5", which tells the user that arrow keys move between the
+tabs; pressing them did nothing, and Tab walked through all seven admin tabs
+one at a time. Plain buttons would at least have described themselves honestly.
+So the choice was to keep the promise or stop making it, and keeping it is what
+the strips actually are.
+
+Two of the four (`SchedulePanel`, `RosterPanel`) were putting `aria-selected` on
+a plain button, which is not valid ARIA — the attribute means nothing on a role
+with no selected state, so the CSS was styling off an attribute assistive
+technology was entitled to ignore.
+
+One implementation rather than four because four copies is how this got here.
+`selection follows focus` is the right variant: every panel is rendered from
+data already in hand, so there is nothing to load and no reason to make someone
+press Enter as well.
+
+## Item 21's hardware half is a checklist, not a claim
+**Date:** 2026-08-11 · **Status:** decided
+
+**Question.** How much of "device matrix" can be closed without devices?
+
+**Decision.** The accessibility audit, the responsive checks and the palette are
+done and tested. The physical checks are written up as a dated checklist in
+[device-matrix.md](device-matrix.md) and left open.
+
+**Why.** Two of them are not merely unverified but *untestable* where they were
+fixed, and saying so is the point:
+
+- **Safe-area insets.** `env(safe-area-inset-*)` resolves to `0px` in every
+  desktop browser, so the landscape fix — the left/right insets were missing
+  entirely, though `viewport-fit=cover` is set — is literally unexercised until
+  it runs on a notched phone.
+- **Pull to refresh.** `body` has `overscroll-behavior-y: contain`, which on
+  Android Chrome disables the native pull-to-refresh. Item 10 built the service
+  worker on the premise that refreshing is what people do when a screen looks
+  stale, so the app may be disabling the gesture it was designed around, on half
+  the fleet. The fix is one word, which is exactly why it was not guessed at:
+  the checklist carries the change to make once someone has an Android phone in
+  hand.
+
+Battery over a 14-hour day and whether `tel:` reaches a dialler are the same
+class — no amount of desktop verification substitutes, so they are named,
+assigned and dated rather than assumed.

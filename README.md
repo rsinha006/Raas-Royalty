@@ -36,7 +36,7 @@ npm run codes -- --list
 ### Tests
 
 ```bash
-npm test        # 338 tests, no build and no server needed
+npm test        # 353 tests, no build and no server needed
 npm run ci      # what CI runs: the client typecheck and build, then the tests
 ```
 

@@ -211,5 +211,5 @@ proxy with a shorter idle timeout at deploy would want it lower.
   and socket survival across a full day of lock/wake are item 21, on real
   hardware.
 - **Anything about correctness.** Zero errors here means zero HTTP failures, not
-  that the right people got the right blocks — that is what the 338 tests are
+  that the right people got the right blocks — that is what the 353 tests are
   for.

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, ApiError } from '../api';
 import { formatRange, formatDateTime, formatTime } from '../time';
+import { useTabStrip } from '../tabstrip';
 import type {
   AssignmentTarget,
   Block,
@@ -342,6 +343,11 @@ export default function SchedulePanel({
   const [staleDeleteId, setStaleDeleteId] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [shifting, setShifting] = useState(false);
+  const dayTabs = useTabStrip(
+    days.map((d) => d.key),
+    day,
+    setDay,
+  );
 
   const load = async () => {
     const [b, t, r] = await Promise.all([
@@ -520,14 +526,10 @@ export default function SchedulePanel({
         </div>
       )}
 
-      <div className="daytabs">
+      {/* `aria-selected` with no role is not valid ARIA — see RosterPanel. */}
+      <div className="daytabs" aria-label="Day" {...dayTabs.tablistProps}>
         {days.map((d) => (
-          <button
-            key={d.key}
-            className="daytab"
-            aria-selected={day === d.key}
-            onClick={() => setDay(d.key)}
-          >
+          <button key={d.key} className="daytab" {...dayTabs.tabProps(d.key)}>
             {d.label}
             <span className="daytab-date">
               {blocks.filter((b) => b.day === d.key).length} blocks

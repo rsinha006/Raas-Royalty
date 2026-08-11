@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api } from '../api';
 import { useLive, resyncSession } from '../live';
+import { useTabStrip } from '../tabstrip';
 import Overview from './Overview';
 import RosterPanel from './RosterPanel';
 import SchedulePanel from './SchedulePanel';
@@ -8,6 +9,7 @@ import ImportPanel from './ImportPanel';
 import LogPanel from './LogPanel';
 import CodesPanel from './CodesPanel';
 import ViewAsPanel from './ViewAsPanel';
+import Loading from '../Loading';
 
 type Tab = 'overview' | 'schedule' | 'roster' | 'viewAs' | 'codes' | 'import' | 'log';
 
@@ -47,14 +49,13 @@ export default function AdminApp() {
 
   // Keeps two admins working the same event in step with each other.
   const liveStatus = useLive(refresh);
+  const { tablistProps, tabProps } = useTabStrip(
+    TABS.map((t) => t.id),
+    tab,
+    setTab,
+  );
 
-  if (!session) {
-    return (
-      <div className="loading-screen">
-        <span className="spinner" />
-      </div>
-    );
-  }
+  if (!session) return <Loading />;
 
   // The socket is handed its rooms from the cookie it connected with, so both
   // sides of an admin session change need a fresh handshake: signing in to
@@ -81,7 +82,7 @@ export default function AdminApp() {
       <header className="topbar" style={{ marginLeft: -16, marginRight: -16 }}>
         <div className="spread">
           <div>
-            <div className="topbar-title">Logistics panel</div>
+            <h1 className="topbar-title">Logistics panel</h1>
             <div className="topbar-sub row">
               <span className={`status-dot ${liveStatus}`} aria-hidden="true" />
               Signed in as {session.admin.name}
@@ -103,21 +104,17 @@ export default function AdminApp() {
         </div>
       )}
 
-      <nav className="admin-tabs" role="tablist">
+      {/* A div, not a <nav>: `role="tablist"` was overriding the navigation
+          landmark anyway, so the element was claiming to be two things. */}
+      <div className="admin-tabs" aria-label="Panel" {...tablistProps}>
         {TABS.map((t) => (
-          <button
-            key={t.id}
-            role="tab"
-            className="admin-tab"
-            aria-selected={tab === t.id}
-            onClick={() => setTab(t.id)}
-          >
+          <button key={t.id} className="admin-tab" aria-controls="adminpanel" {...tabProps(t.id)}>
             {t.label}
           </button>
         ))}
-      </nav>
+      </div>
 
-      <div style={{ paddingTop: 14 }}>
+      <div id="adminpanel" role="tabpanel" style={{ paddingTop: 14 }}>
         {tab === 'overview' && <Overview key={refreshKey} onGoto={setTab} />}
         {/* The two editing panels are NOT keyed on `refreshKey`. Remounting on
             every live event throws away whatever the admin was half-way through

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, ApiError } from '../api';
 import { formatDateTime } from '../time';
+import Loading from '../Loading';
 
 /**
  * The change log, and undo — item 17.
@@ -113,13 +114,7 @@ export default function LogPanel({
     }
   };
 
-  if (!batches) {
-    return (
-      <div className="loading-screen">
-        <span className="spinner" />
-      </div>
-    );
-  }
+  if (!batches) return <Loading label="Loading the change log…" />;
 
   return (
     <div className="card">

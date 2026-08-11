@@ -21,7 +21,7 @@ export default function NowNext({
   if (!current.length && !nextBlocks.length) {
     return (
       <div className="hero">
-        <div className="hero-eyebrow">You're all set</div>
+        <h2 className="hero-eyebrow">You're all set</h2>
         <div className="hero-empty" style={{ marginTop: 10 }}>
           Nothing else on your schedule.
         </div>
@@ -38,9 +38,11 @@ export default function NowNext({
       <div className="hero is-now">
         <div className="hero-stack">
           <div>
-            <div className="hero-eyebrow">
+            {/* The hero is the answer to "where do I need to be", so it is the
+                first thing under the h1 and the first heading to jump to. */}
+            <h2 className="hero-eyebrow">
               <span className="pulse" aria-hidden="true" /> Right now
-            </div>
+            </h2>
             <div className="hero-activity">{primary.activity}</div>
             <div className="hero-time">{formatRange(primary.startTime, primary.endTime)}</div>
             <Where block={primary} />
@@ -73,7 +75,7 @@ export default function NowNext({
     <div className="hero">
       <div className="hero-stack">
         <div>
-          <div className="hero-eyebrow">Up next · {countdown(start, at)}</div>
+          <h2 className="hero-eyebrow">Up next · {countdown(start, at)}</h2>
           <div className="hero-activity">{primary.activity}</div>
           <div className="hero-time">
             {dayLabel} · {formatRange(primary.startTime, primary.endTime)}

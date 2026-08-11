@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, ApiError } from '../api';
+import { useTabStrip } from '../tabstrip';
 import type { Contact, Person, Role, Team } from '../types';
+import Loading from '../Loading';
 
 interface RosterData {
   roles: Role[];
@@ -10,6 +12,7 @@ interface RosterData {
 }
 
 type Section = 'people' | 'teams' | 'contacts' | 'roles';
+const SECTIONS: Section[] = ['people', 'teams', 'contacts', 'roles'];
 
 export default function RosterPanel({
   refreshKey,
@@ -22,6 +25,7 @@ export default function RosterPanel({
   const [data, setData] = useState<RosterData | null>(null);
   const [section, setSection] = useState<Section>('people');
   const [error, setError] = useState<string | null>(null);
+  const { tablistProps, tabProps } = useTabStrip(SECTIONS, section, setSection);
 
   const load = async () => {
     setData(await api.get<RosterData>('/api/admin/roster'));
@@ -69,20 +73,24 @@ export default function RosterPanel({
       }
     });
 
-  if (!data) return <div className="loading-screen"><span className="spinner" /></div>;
+  if (!data) return <Loading label="Loading the roster…" />;
 
   return (
     <>
       {error && <div className="banner offline" style={{ marginBottom: 12 }}>{error}</div>}
 
-      <nav className="admin-tabs" style={{ position: 'static', borderBottom: 0, paddingTop: 0 }}>
-        {(['people', 'teams', 'contacts', 'roles'] as Section[]).map((s) => (
-          <button
-            key={s}
-            className="admin-tab"
-            aria-selected={section === s}
-            onClick={() => setSection(s)}
-          >
+      {/* `aria-selected` on a plain button is not valid ARIA — the attribute
+          only means anything on a role that has a selected state, so this
+          strip was styling off an attribute screen readers were entitled to
+          ignore. It is a real tab strip; now it says so. */}
+      <div
+        className="admin-tabs"
+        aria-label="Roster section"
+        style={{ position: 'static', borderBottom: 0, paddingTop: 0 }}
+        {...tablistProps}
+      >
+        {SECTIONS.map((s) => (
+          <button key={s} className="admin-tab" {...tabProps(s)}>
             {s[0].toUpperCase() + s.slice(1)} (
             {s === 'people'
               ? data.people.length
@@ -94,7 +102,7 @@ export default function RosterPanel({
             )
           </button>
         ))}
-      </nav>
+      </div>
 
       {section === 'people' && <People data={data} mutate={mutate} remove={removeSubject} />}
       {section === 'teams' && <Teams data={data} mutate={mutate} remove={removeSubject} />}

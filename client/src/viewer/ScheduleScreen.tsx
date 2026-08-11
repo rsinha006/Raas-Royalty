@@ -10,9 +10,11 @@ import {
   nextGroup,
 } from '../time';
 import { eventNow, eventZoneAbbreviation, isRehearsing, syncClock } from '../clock';
+import { useTabStrip } from '../tabstrip';
 import BlockCard from './BlockCard';
 import ContactCard from './ContactCard';
 import NowNext from './NowNext';
+import Loading from '../Loading';
 
 /** Signature of everything a viewer would notice moving. */
 function signature(b: Block) {
@@ -145,10 +147,16 @@ export default function ScheduleScreen({
 
   const activeDay = day ?? timeline.activeDay ?? days[0]?.key ?? null;
   const dayBlocks = blocks.filter((b) => b.day === activeDay);
+  const activeDayLabel = days.find((d) => d.key === activeDay)?.label ?? '';
+  const { tablistProps, tabProps } = useTabStrip(
+    days.map((d) => d.key),
+    activeDay,
+    setDay,
+  );
 
   if (gone) {
     return (
-      <div className="landing">
+      <div className="landing" role="main">
         <h1 style={{ fontSize: 24 }}>That entry is no longer on the roster</h1>
         <p className="landing-sub">Logistics may have renamed or removed it. Pick again to continue.</p>
         <button className="btn primary block-w" onClick={onSwitch}>
@@ -161,7 +169,7 @@ export default function ScheduleScreen({
   if (!payload) {
     if (error) {
       return (
-        <div className="landing">
+        <div className="landing" role="main">
           <h1 style={{ fontSize: 24 }}>Can't load your schedule</h1>
           <p className="landing-sub">{error}</p>
           <div className="stack">
@@ -175,12 +183,7 @@ export default function ScheduleScreen({
         </div>
       );
     }
-    return (
-      <div className="loading-screen">
-        <span className="spinner" />
-        <span>Loading your schedule…</span>
-      </div>
-    );
+    return <Loading label="Loading your schedule…" visible />;
   }
 
   const changedTotal = changes.added + changes.updated + changes.removed;
@@ -191,7 +194,11 @@ export default function ScheduleScreen({
       <header className="topbar">
         <div className="spread">
           <div style={{ minWidth: 0 }}>
-            <div className="topbar-title">{payload.subject.name}</div>
+            {/* The one h1 on the screen. Whose schedule this is answers the
+                question a screen reader user arrives with, and it is what the
+                sighted eye lands on too — so it is the same element, not a
+                hidden duplicate. */}
+            <h1 className="topbar-title">{payload.subject.name}</h1>
             <div className="topbar-sub">
               {payload.subject.kind === 'team'
                 ? 'Team schedule'
@@ -215,7 +222,7 @@ export default function ScheduleScreen({
         </div>
       </header>
 
-      <div className="screen">
+      <main className="screen">
         {notice}
 
         {/* Without this, a rehearsal at a pinned time is indistinguishable from
@@ -231,8 +238,13 @@ export default function ScheduleScreen({
           </div>
         )}
 
+        {/* Both banners appear without anyone touching the screen — one when
+            the signal drops, one when logistics moves something. A sighted
+            user gets the colour and the flash; role="status" is how everyone
+            else is told, and polite means it waits for a gap rather than
+            cutting across whatever is being read. */}
         {stale && (
-          <div className="banner offline" style={{ marginTop: 12 }}>
+          <div className="banner offline" style={{ marginTop: 12 }} role="status">
             <span aria-hidden="true">⚠️</span>
             <span>
               You're offline — showing the last known schedule as of{' '}
@@ -243,7 +255,7 @@ export default function ScheduleScreen({
         )}
 
         {changedTotal > 0 && (
-          <div className="banner change" style={{ marginTop: 12 }}>
+          <div className="banner change" style={{ marginTop: 12 }} role="status">
             <span aria-hidden="true">✨</span>
             <span>
               Your schedule just changed
@@ -257,14 +269,15 @@ export default function ScheduleScreen({
 
         <NowNext timeline={timeline} nextBlocks={nextBlocks} days={days} at={at} />
 
-        <div className="daytabs" role="tablist" aria-label="Day">
+        <h2 className="vh">Full schedule</h2>
+        <div className="daytabs" aria-label="Day" {...tablistProps}>
           {days.map((d) => (
             <button
               key={d.key}
-              role="tab"
+              id={`daytab-${d.key}`}
               className="daytab"
-              aria-selected={activeDay === d.key}
-              onClick={() => setDay(d.key)}
+              aria-controls="daypanel"
+              {...tabProps(d.key)}
             >
               {d.label}
               <span className="daytab-date">{formatDayDate(d)}</span>
@@ -272,20 +285,31 @@ export default function ScheduleScreen({
           ))}
         </div>
 
-        {dayBlocks.length ? (
-          <div className="stack">
-            {dayBlocks.map((b) => (
-              <BlockCard
-                key={b.id}
-                block={b}
-                status={timeline.statusById[b.id] ?? 'upcoming'}
-                changed={changes.ids.has(b.id)}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className="empty-day">Nothing scheduled for you on this day.</div>
-        )}
+        <div
+          id="daypanel"
+          className="daypanel"
+          role="tabpanel"
+          aria-labelledby={activeDay ? `daytab-${activeDay}` : undefined}
+          tabIndex={0}
+        >
+          {dayBlocks.length ? (
+            // A list, so a screen reader announces how many items the day
+            // holds and where each one ends — otherwise the whole day is an
+            // unbroken run of text with no boundaries in it.
+            <ul className="stack plainlist" aria-label={`${activeDayLabel} schedule`}>
+              {dayBlocks.map((b) => (
+                <BlockCard
+                  key={b.id}
+                  block={b}
+                  status={timeline.statusById[b.id] ?? 'upcoming'}
+                  changed={changes.ids.has(b.id)}
+                />
+              ))}
+            </ul>
+          ) : (
+            <div className="empty-day">Nothing scheduled for you on this day.</div>
+          )}
+        </div>
 
         <ContactCard contact={payload.contact} />
 
@@ -293,7 +317,7 @@ export default function ScheduleScreen({
           Last updated {formatTimestamp(payload.updatedAt)} ·{' '}
           {stale ? 'reconnecting…' : liveStatus === 'live' ? 'live' : 'connecting…'}
         </p>
-      </div>
+      </main>
     </div>
   );
 }

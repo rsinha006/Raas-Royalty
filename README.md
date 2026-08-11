@@ -33,6 +33,17 @@ Codes are managed in the panel's **Access codes** tab, or from the CLI:
 npm run codes -- --list
 ```
 
+### Tests
+
+```bash
+npm test        # 334 tests, no build and no server needed
+npm run ci      # what CI runs: the client typecheck and build, then the tests
+```
+
+`.github/workflows/ci.yml` runs the same thing on every push and pull request,
+on Node 20 and 22. Each test file builds its own throwaway database, so they
+never touch `data/`.
+
 ### Event time
 
 Every schedule time is resolved server-side against one IANA timezone

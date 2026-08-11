@@ -13,8 +13,8 @@ competition weekend. **Read this at the start of every session.**
 
 ## Where things stand
 
-**Done: Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13
-and 14.** Last updated 2026-08-10.
+**Done: Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13,
+14 and 19.** Last updated 2026-08-10.
 
 - The viewer is **behind access codes**, enforced server-side, with the roster
   no longer enumerable. Codes are managed and exported from the admin panel.
@@ -39,23 +39,25 @@ and 14.** Last updated 2026-08-10.
   undo reverts all of it or refuses and writes nothing.
 - **"Fire alarm, evacuate" is one block**, targeting everyone, reaching every
   session and every socket.
-- **256 tests** run under `npm test`, covering authorization negatives, timezone
-  and DST, code management, the schema migrations, broadcast scoping, the item 14
+- **334 tests run in CI**, covering authorization negatives, timezone and DST,
+  code management, the schema migrations, broadcast scoping, the item 14
   correctness gaps, the bulk shift, the offline shell, preview fidelity,
-  everything undo refuses, and the announcement target.
+  everything undo refuses, the announcement target, and the import pipeline —
+  including last year's real spreadsheets, which the importer has to refuse
+  without moving the schedule.
 
 The open decisions are all resolved (see below); item 12 was reshaped by them.
 
 **Not yet true of this project:** no deployment and no real data.
 
-**Next up: Phase E — item 19 (the import-pipeline tests and a CI script), then
-20 (load test) and 21 (devices and accessibility).**
+**Next up: item 20 (load test), then 21 (devices and accessibility).**
 
 ### Build order
 
-`templates/royalty-schedule-template.xlsx` is still being iterated by logistics.
-It blocks **item 12 only**, plus the parts of 19 and 24 that depend on it.
-Everything else proceeds now, in this order:
+`templates/royalty-schedule-template.xlsx` is still being iterated by logistics
+— and is **still untracked**, so it exists on one laptop. It blocks **item 12
+only**, plus the parts of 24 that depend on it. Everything else proceeds now, in
+this order:
 
 1. ~~**Item 4** — anonymized fixtures.~~ Done.
 2. ~~**Phase B (5–8)** — access codes.~~ Done.
@@ -66,8 +68,9 @@ Everything else proceeds now, in this order:
 
 Item 12 splits: only the tab readers depend on the template's shape. Diff
 classification, apply, the `ingest()` contract, and validation reporting can be
-built now. Same for item 19 — time parsing, midnight handling, diff
-classification, and the authorization negatives are all testable today.
+built now — and are now covered by tests, written against the pipeline as it
+stands rather than against the template. Item 19 is done on that basis; what a
+frozen template adds is the tab readers, not a second test suite.
 
 ⚠️ **The template is still on the critical path for the dress rehearsal
 (item 26)** even though it is built last, because nothing can be demonstrated
@@ -880,9 +883,10 @@ to feed, and it is not in this plan.
 
 ## Phase E — Testing
 
-The draft has zero automated tests and was verified manually, once.
+The draft had zero automated tests and was verified manually, once. It now has
+334, run in CI on every push.
 
-### 19. `[ ]` Build the automated test suite
+### 19. `[x]` Build the automated test suite
 
 Priority order: import pipeline (time parsing across all accepted formats,
 assignment resolution including ambiguous and prefixed cases, diff
@@ -893,7 +897,8 @@ authorization, negative cases explicit.
   script."*
 - **Done when:** CI runs green and the authorization negatives are covered.
 
-**Partly done already**, as a side effect of items 6–18. 256 tests in `tests/`:
+Most of it was already done as a side effect of items 6–18; the import pipeline,
+the fixtures and CI are what this item added. 334 tests in `tests/`:
 
 - ✅ Access-code authorization, negatives explicit (`authorization.test.js`,
   `admin-codes.test.js`) — the done-when above is met on that clause.
@@ -916,10 +921,67 @@ authorization, negative cases explicit.
   delete, an import, a legacy row (`undo.test.js`).
 - ✅ The announcement target, including the two CHECK rebuilds against a
   pre-item-18 database (`announcements.test.js`, `person-roles.test.js`).
-- ❌ **Import pipeline** — time parsing across the accepted formats, assignment
-  resolution, diff classification. Untouched, and the biggest remaining gap.
-- ❌ **No CI script.** `npm test` is run by hand.
-- ❌ Nothing yet runs against the `fixtures/` from item 4.
+- ✅ **Import pipeline** — time parsing across the accepted formats, assignment
+  resolution, diff classification (`import-pipeline.test.js`).
+- ✅ **CI** — `.github/workflows/ci.yml`, and `npm run ci` locally.
+- ✅ The `fixtures/` from item 4 now run through the real pipeline
+  (`fixtures.test.js`).
+
+**Done 2026-08-10** — 78 new tests (`import-pipeline.test.js`,
+`fixtures.test.js`), a CI workflow, and one fix the tests surfaced. 334 total.
+
+```bash
+npm run ci     # the client typecheck and build, then the tests
+```
+
+- **The weight is on what the pipeline refuses**, not on the happy path. The
+  thing that will actually happen on the day is somebody uploading the wrong
+  workbook, so the fixture tests upload last year's real spreadsheets and assert
+  the schedule does not move: every row fails, `removeMissing` therefore sees
+  every managed block as missing, and the "every row failed validation" refusal
+  is the only thing between that and an empty schedule at 1pm Saturday.
+- ⚠️ **`sourceKey` excludes time and location**, so a block that moved is an
+  update and not a delete plus a create — which is what keeps the edit log
+  readable and undo meaningful. It *includes* day, target and activity, so a
+  renamed activity is a new block unless the sheet gives the row an `ID`. Both
+  halves are pinned by a test; the second is the one that will surprise someone.
+- **Blocks with no `source_key` stay invisible to the diff**, deletes included.
+  Item 14 pinned that for seed rows; this adds the case that matters more, a
+  block an admin typed by hand mid-event.
+- **Ambiguity is asserted as a refusal.** Two people share a name in the real
+  roster and a team can be called the same thing as a role, so `Sam Shared` and
+  `Judge` are errors naming the prefixes that would settle them — never a guess
+  at whichever row came first.
+- **Time parsing covers all ten accepted spellings plus midnight and noon**,
+  the two the 12-hour clock gets wrong, and 03:45 because that was a real call
+  time. ⚠️ A meridiem-less cell is taken literally: the fixtures write the
+  meridiem on the end time only, and inheriting it is a row-level job that
+  belongs to item 12. There is a test saying so, so it is a known gap rather
+  than a surprise.
+- **Fixed while testing:** a workbook exceljs cannot open reached the admin as a
+  raw `TypeError: Cannot read properties of undefined`. It is now a message
+  saying to re-save the file. The routes already caught it, so this was never a
+  500 — it was unactionable text on the one screen where the next step matters.
+
+**Found, not fixed — three of the four fixtures cannot be opened at all.** The
+originals in `samples/` parse; the anonymized copies do not, so this is
+`scripts/anonymize_samples.py`, not the importer. openpyxl writes absolute
+relationship targets (`/xl/tables/table1.xml` where Excel writes
+`../tables/table1.xml`) and puts comments under `xl/comments/comment1.xml`
+where exceljs looks for `xl/comments1.xml`; exceljs dereferences undefined on
+both. Rewriting the rels to relative in a post-save pass fixes two of the
+three — verified against a patched copy — and the third needs the comment parts
+moved or dropped. Two smaller defects in the same script: it `rmtree`s
+`fixtures/` before writing, which deletes the committed `fixtures/README.md`,
+and its output is not byte-stable across runs despite the fixed seed, so
+"regenerating doesn't churn the diff" is not true today. The fixture tests are
+written against the directory rather than a list, so repairing this makes them
+stronger rather than red. Worth an item of its own before item 24.
+
+**Also not fixed:** the roster reader accepts a role by label or id but not by
+plural (`Judges` in a Role column is refused), while the assignment column
+accepts all three. Asymmetric, but it fails loudly with the value that failed,
+and the roster reader's messy-input handling belongs to item 12.
 
 ### 20. `[ ]` Load test at 2–3× real scale
 
@@ -1024,7 +1086,7 @@ the two that actually catch problems.
 | ~~T-6 weeks~~ | ~~Phase A.~~ Done — but **real rosters are still not in hand**, and that is a people problem, not an engineering one. Chase it now; it is usually the long pole. |
 | ~~T-5~~ | ~~Phase B (access codes).~~ Done. |
 | T-4 | Phase C (reliability core) — items 9 ✅, 10 ✅, 11 ✅, 13 ✅ and 14 ✅ done; only item 12 remains, and it waits on the template. |
-| T-3 | Phase D + E (admin tooling, tests, load test) — Phase D ✅ done early; Phase E remains. |
+| T-3 | Phase D + E (admin tooling, tests, load test) — Phase D ✅ and item 19 ✅ done early; items 20 and 21 remain. |
 | T-2 | Phase F + item 21 (deploy, ops, devices). |
 | T-1 | Items 24–26. Dress rehearsal. |
 | Event week | Items 27–28. Freeze Wednesday. |

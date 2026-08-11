@@ -21,7 +21,8 @@ otherwise the reasoning is lost between sessions and gets re-litigated.
 npm install && npm run seed && npm run build && npm start   # http://localhost:4000
 npm run dev          # hot reload: client :5173, API :4000
 npm run seed:reset   # rebuild placeholder data from scratch
-npm test             # 256 tests
+npm test             # 334 tests
+npm run ci           # what CI runs: the client typecheck and build, then the tests
 npm run codes -- --list   # every live access code and its subject
 ```
 
@@ -74,7 +75,11 @@ exist yet. Everything in either file must stay idempotent.
 **One import pipeline.** `bytes → parseTabular → normalizeScheduleRows →
 computeScheduleDiff → apply`. Manual upload, force re-sync, and background
 polling all call `ingest()`. Keep it that way — swapping in live Google Sheets
-sync is meant to be an env-var change, not a rewrite.
+sync is meant to be an env-var change, not a rewrite. Two invariants inside it
+are load-bearing and tested: a row's `sourceKey` **excludes time and location**,
+so a block that moved is an update rather than a delete plus a create; and an
+import owns exactly the rows carrying a `source_key`, so seed and hand-added
+blocks stay invisible to the diff, `removeMissing` included.
 
 **The server owns time, the client owns its passing.** Blocks ship with
 absolute `startsAt`/`endsAt` resolved against the venue's zone; the client only
@@ -117,8 +122,8 @@ Data model and spreadsheet templates are documented in [README.md](README.md).
 
 ## Current state
 
-Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13 and 14
-are done — see
+Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13, 14 and
+19 are done — see
 [PLAN.md](PLAN.md) for what each one settled. In short: the viewer is behind
 access codes enforced server-side, event times are resolved against the venue's
 timezone by the server, changes reach only the people they affect, each person's
@@ -126,7 +131,8 @@ timezone by the server, changes reach only the people they affect, each person's
 silently merged, a whole afternoon can be pushed back in one previewed action,
 a reload with no signal still shows the last known schedule, an admin can see
 exactly what any one person sees, a change can be put back, "fire alarm,
-evacuate" is one block rather than six, and 256 tests run under `npm test`.
+evacuate" is one block rather than six, an upload of the wrong spreadsheet is
+refused rather than half-applied, and 334 tests run in CI.
 
 Still not true: no deployment and no real data.
 

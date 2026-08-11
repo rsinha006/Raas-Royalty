@@ -72,7 +72,21 @@ function cellValue(v) {
 
 async function parseXlsx(buffer) {
   const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load(buffer);
+  try {
+    await wb.xlsx.load(buffer);
+  } catch (err) {
+    // exceljs reconciles comments, tables and drawings before it hands over any
+    // cells, and it does that against the part layout Excel itself writes. A
+    // workbook saved by another tool can be perfectly valid and still fail here
+    // — openpyxl writes absolute relationship targets and puts comments under
+    // `xl/comments/`, and both make exceljs dereference undefined. What reaches
+    // the admin otherwise is a raw internal TypeError with no suggestion of
+    // what to do about it, on the one screen where the next action matters.
+    throw new Error(
+      `this workbook is not in a layout the reader can open (${err.message}). ` +
+        'Open it in Excel or Google Sheets, re-save it as .xlsx or .csv, and upload that.'
+    );
+  }
   const ws = wb.worksheets[0];
   if (!ws) return [];
   const rows = [];

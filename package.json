@@ -17,6 +17,7 @@
     "seed:reset": "node server/seed.js --reset",
     "codes": "node server/codes.js",
     "test": "node --test \"tests/**/*.test.js\"",
+    "ci": "npm run build && npm test",
     "postinstall": "npm --prefix client install"
   },
   "dependencies": {

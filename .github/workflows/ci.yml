@@ -1,0 +1,44 @@
+name: CI
+
+# Item 19. The tests were run by hand until now, which is fine until the week
+# where every change is made under pressure by someone who is also carrying a
+# radio. Runs on every push and every pull request.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      # Not belt and braces: the deploy target is still open (item 22), so the
+      # floor in package.json's `engines` and the current LTS both have to pass.
+      fail-fast: false
+      matrix:
+        node: ['20', '22']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+
+      # The root postinstall installs the client too.
+      - run: npm ci
+
+      # `tsc --noEmit && vite build`. The build is here for the typecheck and
+      # because the service-worker manifest is generated from the real bundle —
+      # a client that does not build is a shell that does not update.
+      - run: npm run build
+
+      - run: npm test
+        env:
+          # The tests each use a throwaway database, but the server refuses to
+          # boot on an unresolvable zone and CI machines are UTC.
+          EVENT_TIMEZONE: America/Indiana/Indianapolis

@@ -927,7 +927,11 @@ the fixtures and CI are what this item added. 335 tests in `tests/`:
   pre-item-18 database (`announcements.test.js`, `person-roles.test.js`).
 - ✅ **Import pipeline** — time parsing across the accepted formats, assignment
   resolution, diff classification (`import-pipeline.test.js`).
-- ✅ **CI** — `.github/workflows/ci.yml`, and `npm run ci` locally.
+- ✅ **CI** — `.github/workflows/ci.yml`, and `npm run ci` locally. ⚠️ Green on
+  the matrix only from 2026-08-10: the first push after this item was written
+  failed the Node 20 leg, because `node --test` did not expand globs until Node
+  21 and the script's pattern was quoted. Passing locally on a newer Node is not
+  evidence about the floor in `engines`; only a run is.
 - ✅ The `fixtures/` from item 4 now run through the real pipeline
   (`fixtures.test.js`) — which needed the fixtures repaired first; see below.
 

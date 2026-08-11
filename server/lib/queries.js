@@ -1,4 +1,4 @@
-import { db, getMeta, scheduleUpdatedAt, versionForTargets } from '../db.js';
+import { db, getMeta, prepareCached, scheduleUpdatedAt, versionForTargets } from '../db.js';
 import { blockInstants, dayInstants, eventTimeState } from './event-time.js';
 
 /* ------------------------------------------------------------------ *
@@ -367,8 +367,10 @@ export function blocksForTargets(targets) {
   if (!targets.length) return [];
   const clause = targets.map(() => '(b.applies_to_type = ? AND b.applies_to_id = ?)').join(' OR ');
   const params = targets.flatMap((t) => [t.type, t.id]);
-  return db
-    .prepare(`${BLOCK_SELECT} WHERE ${clause} ORDER BY b.day, b.start_time, b.end_time`)
+  // Cached on the SQL text, which varies only by how many targets the session
+  // has — this is the query every viewer runs, so compiling it per request was
+  // most of its cost. See `prepareCached`.
+  return prepareCached(`${BLOCK_SELECT} WHERE ${clause} ORDER BY b.day, b.start_time, b.end_time`)
     .all(...params)
     .map(shapeBlock);
 }

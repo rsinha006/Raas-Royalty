@@ -182,6 +182,40 @@ describe('block start and end instants', () => {
   });
 });
 
+/**
+ * Resolved instants are memoized (item 20 — it was ~40% of the personalized
+ * schedule's cost, and 600 phones refetch the same handful of times at once).
+ * Both risks a cache introduces are checked here, because both would be silent:
+ * one caller mutating another's Date, and an answer surviving a zone change.
+ */
+describe('the instant cache', () => {
+  test('each call gets its own Date, so a caller cannot corrupt the cache', () => {
+    const first = instantFor('2026-08-08', '09:00');
+    const second = instantFor('2026-08-08', '09:00');
+    assert.equal(first.getTime(), second.getTime());
+    assert.notEqual(first, second);
+
+    first.setFullYear(1999);
+    assert.equal(instantFor('2026-08-08', '09:00').toISOString(), '2026-08-08T13:00:00.000Z');
+  });
+
+  test('a malformed reading stays null rather than being resolved once and cached wrong', () => {
+    assert.equal(instantFor('2026-08-08', '25:00'), null);
+    assert.equal(instantFor('2026-08-08', '25:00'), null);
+    assert.equal(instantFor('not-a-date', '09:00'), null);
+  });
+
+  test('a zone change is not answered from the old zone', () => {
+    assert.equal(instantFor('2026-08-08', '09:00').toISOString(), '2026-08-08T13:00:00.000Z');
+    process.env.EVENT_TIMEZONE = 'Europe/London';
+    resetTimezoneCache();
+    assert.equal(instantFor('2026-08-08', '09:00').toISOString(), '2026-08-08T08:00:00.000Z');
+    delete process.env.EVENT_TIMEZONE;
+    resetTimezoneCache();
+    assert.equal(instantFor('2026-08-08', '09:00').toISOString(), '2026-08-08T13:00:00.000Z');
+  });
+});
+
 describe('the rehearsal override', () => {
   test('is read as venue wall-clock, not as the reader\'s local time', () => {
     assert.equal(

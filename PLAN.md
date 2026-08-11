@@ -14,7 +14,7 @@ competition weekend. **Read this at the start of every session.**
 ## Where things stand
 
 **Done: Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13,
-14 and 19.** Last updated 2026-08-10.
+14, 19 and 20.** Last updated 2026-08-10.
 
 - The viewer is **behind access codes**, enforced server-side, with the roster
   no longer enumerable. Codes are managed and exported from the admin panel.
@@ -39,18 +39,22 @@ competition weekend. **Read this at the start of every session.**
   undo reverts all of it or refuses and writes nothing.
 - **"Fire alarm, evacuate" is one block**, targeting everyone, reaching every
   session and every socket.
-- **335 tests run in CI**, covering authorization negatives, timezone and DST,
+- **338 tests run in CI**, covering authorization negatives, timezone and DST,
   code management, the schema migrations, broadcast scoping, the item 14
   correctness gaps, the bulk shift, the offline shell, preview fidelity,
   everything undo refuses, the announcement target, and the import pipeline —
   including last year's real spreadsheets, which the importer has to refuse
   without moving the schedule.
+- **600 phones have been measured, not assumed.** The worst change the product
+  can make — an announcement to everyone — reaches all 600 in ~140 ms with no
+  errors, and the personalized schedule is 3.7× cheaper than it was before the
+  test profiled it.
 
 The open decisions are all resolved (see below); item 12 was reshaped by them.
 
 **Not yet true of this project:** no deployment and no real data.
 
-**Next up: item 20 (load test), then 21 (devices and accessibility).**
+**Next up: item 21 (devices and accessibility), then Phase F (deploy and ops).**
 
 ### Build order
 
@@ -884,7 +888,7 @@ to feed, and it is not in this plan.
 ## Phase E — Testing
 
 The draft had zero automated tests and was verified manually, once. It now has
-335, run in CI on every push.
+338, run in CI on every push.
 
 ### 19. `[x]` Build the automated test suite
 
@@ -994,7 +998,7 @@ plural (`Judges` in a Role column is refused), while the assignment column
 accepts all three. Asymmetric, but it fails loudly with the value that failed,
 and the roster reader's messy-input handling belongs to item 12.
 
-### 20. `[ ]` Load test at 2–3× real scale
+### 20. `[x]` Load test at 2–3× real scale
 
 600 connections, a burst of admin edits, a mass reconnect. (Raised from 400:
 last year was ~260 people, not the ~170 originally assumed.)
@@ -1003,6 +1007,46 @@ last year was ~260 people, not the ~170 originally assumed.)
   not reassurance.
 - **Done when:** you know the response-time ceiling and have fixed whatever it
   surfaced.
+
+**Done 2026-08-10** — `scripts/load-test.js`, `scripts/load-fixture.js`, and
+three hot-path fixes. Full numbers in [docs/load-test.md](docs/load-test.md).
+
+```bash
+npm run load-test              # 600 clients, six scenarios, ~90s
+```
+
+600 virtual phones against a 280-person roster, each doing what a phone does:
+redeem a code, pick a name at the identity step, hold a socket, refetch with no
+debounce. **Zero errors in every scenario, twice.**
+
+- **The ceiling is one number: ~105µs of server CPU per personalized schedule.**
+  better-sqlite3 is synchronous, so a fan-out is that figure times the fleet — a
+  queue, not a cliff, and linear out to 1000 clients. The worst case the product
+  can produce is an announcement, which reaches every session by construction:
+  **~140 ms** from the admin's save to the last of 600 phones holding fresh data.
+  Peak RSS 210 MB; 3.3 CPU-seconds for the whole run.
+- ⚠️ **The test paid for itself before it measured anything.** Profiling the path
+  it exercised took `getPersonalizedSchedule` from **388µs to 105µs** — memoized
+  instants (an `Intl` pass per block time, on every request), a cached
+  zone-abbreviation formatter, and cached prepared statements for the two
+  queries whose SQL varies only by target count. That is the difference between
+  a 288 ms and a 139 ms fan-out. Three tests cover the instant cache's two
+  silent failure modes.
+- **Item 11's scoping holds under load, and is worth what it cost:** one team's
+  edit woke **66 of 600** clients — exactly that team's — and settled in 26 ms.
+  The other 534 received no bytes at all. Every row of that table would read
+  like the announcement row without it.
+- **Keep-alive was the one real defect.** Node's 5-second default closed idle
+  connections in the gap between refetches, resetting roughly one per thousand —
+  which the viewer cannot distinguish from being offline, so it showed
+  "Offline · last known" on a phone with full signal. Now 65 s, tunable with
+  `KEEP_ALIVE_TIMEOUT_MS`; set it below the proxy's idle timeout at deploy.
+- **A roster edit is the slowest admin action at ~60 ms**, because it re-derives
+  all 600 sockets' rooms inside the request. Measured, recorded, and left
+  synchronous on purpose — see `docs/decisions.md`.
+
+**Not covered:** real network, TLS, a proxy, or mobile radios — venue wifi will
+dominate every number here, and that is items 21 and 26. Nor a day-long soak.
 
 ### 21. `[ ]` Device matrix and accessibility pass
 
@@ -1080,7 +1124,7 @@ for "I lost my link" at the check-in desk.
 | Dancer schedules have no source and never get authored | Named owner for the content work at item 24 | 24 |
 | ~~Late schema change forces rework~~ | Closed — model confirmed against past-year data, and applied in item 13 with a migration that runs on boot | 2, 3, 13 |
 | Real roster still not in hand | A people problem, not an engineering one — it was due at T-6 and is the likeliest thing to slip past the rehearsal | 24 |
-| Thundering herd on every change | Audience-scoped broadcasts ✅ — still to be confirmed under load | 11, 20 |
+| ~~Thundering herd on every change~~ | Closed — one team's edit wakes 66 of 600 phones, and even an announcement to all 600 settles in ~140ms with no errors | 11, 20 |
 | A wrong change made under pressure and no way back | Closed — one admin action is one log entry and undo reverts all of it, refusing rather than half-applying | 17 |
 | Total app failure during the event | Backups, monitoring, printed fallback | 23, 28 |
 
@@ -1097,7 +1141,7 @@ the two that actually catch problems.
 | ~~T-6 weeks~~ | ~~Phase A.~~ Done — but **real rosters are still not in hand**, and that is a people problem, not an engineering one. Chase it now; it is usually the long pole. |
 | ~~T-5~~ | ~~Phase B (access codes).~~ Done. |
 | T-4 | Phase C (reliability core) — items 9 ✅, 10 ✅, 11 ✅, 13 ✅ and 14 ✅ done; only item 12 remains, and it waits on the template. |
-| T-3 | Phase D + E (admin tooling, tests, load test) — Phase D ✅ and item 19 ✅ done early; items 20 and 21 remain. |
+| T-3 | Phase D + E (admin tooling, tests, load test) — Phase D ✅, item 19 ✅ and item 20 ✅ done early; item 21 remains. |
 | T-2 | Phase F + item 21 (deploy, ops, devices). |
 | T-1 | Items 24–26. Dress rehearsal. |
 | Event week | Items 27–28. Freeze Wednesday. |

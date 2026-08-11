@@ -38,6 +38,27 @@ const app = createApp({ broadcast });
 const server = http.createServer(app);
 
 /**
+ * Keep idle connections open longer than the gap between refetches.
+ *
+ * Every phone holds one connection and uses it in bursts: nothing for minutes,
+ * then a request the moment something changes. Node's 5-second default closes
+ * the socket in that gap, and a client that reuses it in the same instant gets
+ * ECONNRESET — which `ScheduleScreen` cannot tell from being offline, so it
+ * renders the "Offline · last known" banner on a phone with full signal. The
+ * item 20 load test reproduced exactly one of these per thousand refetches.
+ *
+ * `headersTimeout` must stay above `keepAliveTimeout`, or Node reintroduces the
+ * race it is set to remove. Both are below the 75s idle timeout that ALBs and
+ * most managed proxies default to; if the deploy in item 22 uses a proxy with a
+ * *shorter* one, the proxy becomes the thing closing the socket and this needs
+ * to come down to match it — which is why it is an env var rather than a
+ * constant.
+ */
+const KEEP_ALIVE_MS = Number(process.env.KEEP_ALIVE_TIMEOUT_MS ?? 65_000);
+server.keepAliveTimeout = KEEP_ALIVE_MS;
+server.headersTimeout = KEEP_ALIVE_MS + 5_000;
+
+/**
  * The origin check runs in `allowRequest` rather than only in `cors`, because
  * that is the one hook that sees the request itself — and comparing Origin
  * against the request's own Host is what makes same-origin work everywhere

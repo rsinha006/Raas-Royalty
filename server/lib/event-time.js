@@ -76,6 +76,7 @@ export function eventTimezone() {
 /** Test seam — config is read once and cached, so tests need a way to re-read it. */
 export function resetTimezoneCache() {
   cachedZone = null;
+  instantCache.clear();
 }
 
 const partsCache = new Map();
@@ -143,21 +144,52 @@ const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const TIME_RE = /^(\d{1,2}):(\d{2})$/;
 
 /**
+ * Resolved wall-clock readings, keyed on exactly what determines the answer.
+ *
+ * Resolving one `(date, HH:MM)` pair costs two `Intl` format passes, and the
+ * personalized schedule resolves two per block plus two per event day — on
+ * every request, for the same handful of pairs, since a schedule holds a few
+ * hundred distinct times and 600 phones all ask about the same ones. The load
+ * test (item 20) measured that as ~160µs of the ~390µs a personalized schedule
+ * took, and better-sqlite3 is synchronous, so per-request microseconds are what
+ * the fan-out queue is made of.
+ *
+ * Keyed on the arguments and cleared with the zone, so it cannot answer for a
+ * zone that is no longer configured. Bounded by what is in the schedule; the
+ * cap is belt and braces, not a working limit.
+ */
+const instantCache = new Map();
+const INSTANT_CACHE_MAX = 5000;
+
+/**
  * `('2026-08-08', '09:00')` → the instant that is 9am at the venue that day.
  * Returns null on anything malformed, so a bad row degrades to "no now/next
  * status" rather than to a plausible-looking wrong time.
  */
 export function instantFor(date, hhmm, { plusDays = 0 } = {}) {
+  const key = `${date}|${hhmm}|${plusDays}`;
+  if (instantCache.has(key)) {
+    const cached = instantCache.get(key);
+    // A fresh Date each time: callers get an object they own, so a cache here
+    // can never turn into one caller mutating another's instant.
+    return cached === null ? null : new Date(cached);
+  }
+
   const d = DATE_RE.exec(String(date ?? ''));
   const t = TIME_RE.exec(String(hhmm ?? ''));
-  if (!d || !t) return null;
-  const hour = Number(t[1]);
-  const minute = Number(t[2]);
-  if (hour > 23 || minute > 59) return null;
-  return instantFromWallClock(
-    { year: Number(d[1]), month: Number(d[2]), day: Number(d[3]) + plusDays, hour, minute },
-    eventTimezone()
-  );
+  const hour = t ? Number(t[1]) : 0;
+  const minute = t ? Number(t[2]) : 0;
+  const instant =
+    !d || !t || hour > 23 || minute > 59
+      ? null
+      : instantFromWallClock(
+          { year: Number(d[1]), month: Number(d[2]), day: Number(d[3]) + plusDays, hour, minute },
+          eventTimezone()
+        );
+
+  if (instantCache.size >= INSTANT_CACHE_MAX) instantCache.clear();
+  instantCache.set(key, instant === null ? null : instant.getTime());
+  return instant;
 }
 
 /**
@@ -204,11 +236,22 @@ export function instantFromWallClockString(input) {
   );
 }
 
-/** Short zone name at a given moment — "EDT" — for admin confirmation at deploy. */
+/**
+ * Short zone name at a given moment — "EDT" — for admin confirmation at deploy.
+ *
+ * The formatter is cached like the one above rather than built per call:
+ * constructing an `Intl.DateTimeFormat` costs ~40µs, and this runs inside
+ * `eventTimeState`, which is on every schedule payload.
+ */
+const abbreviationCache = new Map();
+
 export function zoneAbbreviation(instant = new Date(), zone = eventTimezone()) {
-  const part = new Intl.DateTimeFormat('en-US', { timeZone: zone, timeZoneName: 'short' })
-    .formatToParts(instant)
-    .find((p) => p.type === 'timeZoneName');
+  let f = abbreviationCache.get(zone);
+  if (!f) {
+    f = new Intl.DateTimeFormat('en-US', { timeZone: zone, timeZoneName: 'short' });
+    abbreviationCache.set(zone, f);
+  }
+  const part = f.formatToParts(instant).find((p) => p.type === 'timeZoneName');
   return part ? part.value : zone;
 }
 

@@ -28,6 +28,33 @@ if (migrated.length) console.log(`[db] migrated: ${migrated.join(', ')}`);
 
 export const dbPath = DB_PATH;
 
+/**
+ * `db.prepare` for SQL whose *shape* is fixed but whose text is built per call.
+ *
+ * The personalized schedule ORs over one clause per block target, so its SQL
+ * text depends on how many targets a session has — which meant compiling the
+ * statement afresh on every request. Compiling costs more than running it
+ * (~30µs against ~3µs for the version lookup), and with better-sqlite3 being
+ * synchronous, every microsecond on this path is queue time for the next of 600
+ * phones refetching. Measured by the item 20 load test.
+ *
+ * ⚠️ Only for SQL assembled from a fixed vocabulary — here, a count of
+ * placeholders. Never key this on anything a request supplies: values belong in
+ * parameters, and a cache keyed on caller-controlled text would grow without
+ * bound. Populated lazily after migrations have run, so no cached statement can
+ * outlive a table rebuild.
+ */
+const statementCache = new Map();
+
+export function prepareCached(sql) {
+  let stmt = statementCache.get(sql);
+  if (!stmt) {
+    stmt = db.prepare(sql);
+    statementCache.set(sql, stmt);
+  }
+  return stmt;
+}
+
 /** Monotonic-ish id that stays readable in the edit log. */
 export function newId(prefix) {
   return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
@@ -114,9 +141,9 @@ export function versionForTargets(targets) {
   let newest = getMeta('roster_updated_at');
   if (list.length) {
     const clause = list.map(() => '(target_type = ? AND target_id = ?)').join(' OR ');
-    const row = db
-      .prepare(`SELECT MAX(updated_at) AS at FROM target_versions WHERE ${clause}`)
-      .get(...list.flatMap((t) => [t.type, t.id]));
+    const row = prepareCached(
+      `SELECT MAX(updated_at) AS at FROM target_versions WHERE ${clause}`
+    ).get(...list.flatMap((t) => [t.type, t.id]));
     if (row?.at && (!newest || row.at > newest)) newest = row.at;
   }
   return newest || getMeta('target_versions_epoch') || scheduleUpdatedAt();

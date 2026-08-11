@@ -36,13 +36,24 @@ npm run codes -- --list
 ### Tests
 
 ```bash
-npm test        # 335 tests, no build and no server needed
+npm test        # 338 tests, no build and no server needed
 npm run ci      # what CI runs: the client typecheck and build, then the tests
 ```
 
 `.github/workflows/ci.yml` runs the same thing on every push and pull request,
 on Node 20 and 22. Each test file builds its own throwaway database, so they
 never touch `data/`.
+
+### Load test
+
+```bash
+npm run load-test               # 600 virtual phones, six scenarios, ~90s
+npm run load-test -- --clients 280
+```
+
+Not part of CI — it spawns a server and forks worker processes. It builds its
+own fixture at `data/load-test.db` (a 280-person roster) and never touches the
+dev database. Results and what they mean: [docs/load-test.md](docs/load-test.md).
 
 ### Event time
 

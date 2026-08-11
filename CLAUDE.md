@@ -21,9 +21,10 @@ otherwise the reasoning is lost between sessions and gets re-litigated.
 npm install && npm run seed && npm run build && npm start   # http://localhost:4000
 npm run dev          # hot reload: client :5173, API :4000
 npm run seed:reset   # rebuild placeholder data from scratch
-npm test             # 335 tests
+npm test             # 338 tests
 npm run ci           # what CI runs: the client typecheck and build, then the tests
 npm run codes -- --list   # every live access code and its subject
+npm run load-test         # 600 virtual phones against an isolated fixture DB
 ```
 
 Admin at `/admin` (password `royalty-admin` by default — set
@@ -50,7 +51,7 @@ React/Vite bundle from `client/dist`. No external services.
 - `client/src/viewer/` — the participant app
 - `client/src/admin/` — the logistics panel
 
-Seven things worth knowing before changing anything:
+Eight things worth knowing before changing anything:
 
 **Block targets are four-way, and the fourth is not like the others.** A block
 targets a team, a person, a role, or `everyone` — the announcement audience,
@@ -118,12 +119,22 @@ than restoring blocks for someone no longer on the roster. Don't thread batch id
 per route, and don't offer undo per log row — item 15 exists to stop half a day
 sitting 20 minutes from the other half.
 
+**Per-request CPU on `/api/schedule` is the fan-out ceiling.** better-sqlite3 is
+synchronous, so 600 phones refetching after one change are served one at a time:
+the settle time is the per-request cost times the fleet. That makes three caches
+on this path load-bearing rather than premature — memoized instants in
+`event-time.js`, the zone-abbreviation formatter beside them, and `prepareCached`
+in `db.js` for the two queries whose SQL varies only by target count. Together
+they took `getPersonalizedSchedule` from 388µs to 105µs; measured numbers are in
+[docs/load-test.md](docs/load-test.md). ⚠️ Adding an `Intl` construction, or a
+`db.prepare` of assembled SQL, back into this path costs every phone at once.
+
 Data model and spreadsheet templates are documented in [README.md](README.md).
 
 ## Current state
 
-Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13, 14 and
-19 are done — see
+Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13, 14, 19
+and 20 are done — see
 [PLAN.md](PLAN.md) for what each one settled. In short: the viewer is behind
 access codes enforced server-side, event times are resolved against the venue's
 timezone by the server, changes reach only the people they affect, each person's
@@ -132,7 +143,8 @@ silently merged, a whole afternoon can be pushed back in one previewed action,
 a reload with no signal still shows the last known schedule, an admin can see
 exactly what any one person sees, a change can be put back, "fire alarm,
 evacuate" is one block rather than six, an upload of the wrong spreadsheet is
-refused rather than half-applied, and 335 tests run in CI.
+refused rather than half-applied, 600 concurrent phones have been measured
+rather than assumed, and 338 tests run in CI.
 
 Still not true: no deployment and no real data.
 

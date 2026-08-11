@@ -926,3 +926,56 @@ and `target_versions` are rebuilt in `migrate.js` — create, copy, drop, rename
 re-index. Verified against the real 110-block dev database: every row, version
 and index survived. The alternative was dropping the constraints, which would
 have traded a one-time migration for a permanently weaker invariant.
+
+---
+
+## The fan-out ceiling is per-request CPU, and it is spent up front
+**Date:** 2026-08-10 · **Status:** decided
+
+**Question.** Item 20 asked for a load test at 600 connections and for whatever
+it surfaced to be fixed. It surfaced that the personalized schedule cost 388µs
+of server CPU. What is the ceiling actually made of, and how much of that 388µs
+is worth buying back?
+
+**Decision.** Treat **per-request CPU on `/api/schedule` as the single number
+that sets the ceiling**, and spend effort there rather than on concurrency.
+Three caches — resolved instants, the zone-abbreviation formatter, and the
+prepared statements whose SQL varies only by target count — took it to 105µs.
+Nothing was made asynchronous, and no work was moved off the request path.
+
+**Why.** better-sqlite3 is synchronous by design (see the stack decision), so
+600 phones refetching after one announcement are served strictly one after
+another. The fan-out is therefore *per-request cost × fleet size*, a queue with
+no cliff in it: at 388µs the fleet settled in 288 ms, at 105µs in 139 ms, and
+the shape stays linear out to 1000 clients. That makes microseconds on this one
+path worth more than any amount of architecture, and it makes the ceiling
+predictable — a number anyone can multiply, rather than a threshold to discover
+at 1pm on Saturday.
+
+What we gave up: three caches are three things that can serve a stale answer.
+Two of them are keyed on values that cannot change during a run (a formatter per
+zone, a statement per SQL shape). The third — resolved instants — is cleared
+with the timezone cache and hands back a fresh `Date` on every call, so neither
+a zone change nor a mutating caller can be answered from it, and there are tests
+for both. `prepareCached` is deliberately restricted to SQL assembled from a
+fixed vocabulary; keying it on anything a request supplies would make it grow
+without bound.
+
+**Also decided: the room sweep on roster edits stays synchronous.** A renamed
+team broadcasts unscoped and re-derives all 600 sockets' room membership in the
+request, costing ~60 ms of admin latency and pushing that fleet's refetches from
+80 ms to 125 ms. Chunking it across ticks would recover ~60 ms on the rarest
+write path in the panel, at the cost of complicating the one computation that
+keeps "who hears about this block" and "whose schedule contains it" identical.
+Measured, recorded in [load-test.md](load-test.md), and left alone.
+
+**Also decided: keep-alive is 65 seconds, not Node's 5.** A phone uses its
+connection in bursts — idle for minutes, then a refetch the instant something
+changes — and the default closed the socket inside that gap often enough to
+reset roughly one refetch per thousand. The viewer cannot tell that from being
+offline, so the symptom was an "Offline · last known" banner on a phone with
+full signal. The trade is visible at 1000 simultaneous reconnects, where ~6–8%
+of websocket upgrades need socket.io's retry; that is invisible to the user and
+self-healing, which is the better of the two failures. It is an env var
+(`KEEP_ALIVE_TIMEOUT_MS`) because a proxy with a shorter idle timeout would need
+it lower — set it at deploy, item 22.

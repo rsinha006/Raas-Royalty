@@ -9,7 +9,7 @@
 import { db, newId, nowIso, touchRosterVersion, touchScheduleVersion, setMeta } from './db.js';
 import { logEdit } from './lib/mutations.js';
 import { backfillAccessCodes } from './lib/access-codes.js';
-import { backfillTargetVersions } from './migrate.js';
+import { backfillTargetVersions, ensureEventRoles } from './migrate.js';
 
 const RESET = process.argv.includes('--reset');
 
@@ -88,9 +88,21 @@ const seed = db.transaction(() => {
   /* -------------------- meta + days -------------------- */
   setMeta('event_name', 'Royalty 2026');
 
+  /**
+   * ⚠️ Placeholder dates — item 24 is where the real ones get pinned.
+   *
+   * Four days rather than two because the weekend is four days: the template
+   * has a Thursday and a Sunday grid, teams arrive Thursday and fly out Sunday,
+   * and the airport runs on both are person-targeted blocks. A block whose Day
+   * has no `event_days` row does not import — it is rejected by the row — so a
+   * missing day is a silent hole in exactly the schedules (arrivals,
+   * departures) that people check on their phones at an airport.
+   */
   const days = [
-    { key: 'Fri', label: 'Friday', date: '2026-08-07', sort: 1 },
-    { key: 'Sat', label: 'Saturday', date: '2026-08-08', sort: 2 },
+    { key: 'Thu', label: 'Thursday', date: '2026-08-06', sort: 1 },
+    { key: 'Fri', label: 'Friday', date: '2026-08-07', sort: 2 },
+    { key: 'Sat', label: 'Saturday', date: '2026-08-08', sort: 3 },
+    { key: 'Sun', label: 'Sunday', date: '2026-08-09', sort: 4 },
   ];
   const insDay = db.prepare(
     'INSERT INTO event_days (key, label, date, sort_order) VALUES (?, ?, ?, ?)'
@@ -120,6 +132,10 @@ const seed = db.transaction(() => {
     'INSERT INTO roles (id, label, selector, blurb, sort_order, active) VALUES (?, ?, ?, ?, ?, 1)'
   );
   roles.forEach((r) => insRole.run(r.id, r.label, r.selector, r.blurb, r.sort));
+  // Liaison and RAS Rep live in migrate.js, which owns them for existing
+  // databases too. `--reset` empties this table after that has already run, so
+  // without this call a reset database is one the real People tab cannot load.
+  ensureEventRoles(db);
 
   /* -------------------- locations -------------------- */
   const locs = [

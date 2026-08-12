@@ -70,6 +70,18 @@ function cellValue(v) {
   return v;
 }
 
+function sheetMatrix(ws) {
+  const rows = [];
+  ws.eachRow({ includeEmpty: false }, (row) => {
+    // row.values is 1-indexed with a leading hole.
+    const values = Array.isArray(row.values) ? row.values.slice(1) : [];
+    const cells = values.map(cellValue);
+    if (cells.some((c) => c !== '' && c !== null && c !== undefined)) rows.push(cells);
+  });
+  return rows;
+}
+
+/** @returns {Promise<Array<{name: string, matrix: any[][]}>>} every sheet, in workbook order. */
 async function parseXlsx(buffer) {
   const wb = new ExcelJS.Workbook();
   try {
@@ -87,16 +99,7 @@ async function parseXlsx(buffer) {
         'Open it in Excel or Google Sheets, re-save it as .xlsx or .csv, and upload that.'
     );
   }
-  const ws = wb.worksheets[0];
-  if (!ws) return [];
-  const rows = [];
-  ws.eachRow({ includeEmpty: false }, (row) => {
-    // row.values is 1-indexed with a leading hole.
-    const values = Array.isArray(row.values) ? row.values.slice(1) : [];
-    const cells = values.map(cellValue);
-    if (cells.some((c) => c !== '' && c !== null && c !== undefined)) rows.push(cells);
-  });
-  return rows;
+  return wb.worksheets.map((ws) => ({ name: ws.name, matrix: sheetMatrix(ws) }));
 }
 
 /* ---------------------------- Entry point ---------------------------- */
@@ -108,30 +111,74 @@ function headerKey(h) {
     .replace(/[\s_-]+/g, ' ');
 }
 
-/**
- * @returns {Promise<{headers: string[], rows: Array<Record<string, any>>}>}
- *   Each row is keyed by normalized header AND by column index, so a template
- *   with slightly different header spelling can still be positionally mapped.
- */
-export async function parseTabular(buffer, filename = '') {
-  const ext = filename.toLowerCase().split('.').pop();
-  let matrix;
-  if (ext === 'xlsx' || ext === 'xlsm') {
-    matrix = await parseXlsx(buffer);
-  } else {
-    matrix = parseCsv(buffer.toString('utf8'));
-  }
-  if (!matrix.length) return { headers: [], rows: [] };
+/** First row is the header; every later row is keyed by normalized header. */
+function tabulate(matrix, sheetName = null) {
+  if (!matrix.length) return { headers: [], rows: [], sheetName };
 
   const headers = matrix[0].map((h) => String(cellValue(h) ?? '').trim());
   const rows = matrix.slice(1).map((cells, idx) => {
-    const obj = { __row: idx + 2, __cells: cells };
+    const obj = { __row: idx + 2, __cells: cells, __sheet: sheetName };
     headers.forEach((h, i) => {
       obj[headerKey(h)] = cells[i] ?? '';
     });
     return obj;
   });
-  return { headers, rows };
+  return { headers, rows, sheetName };
+}
+
+/** Sheet names compare case- and space-insensitively; "Slot Times" vs "slot times". */
+const sheetKey = (s) => String(s ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+
+/**
+ * Read a workbook (or CSV) as one table.
+ *
+ * ⚠️ `prefer` is what makes the real template readable. Before it, this took
+ * `worksheets[0]`, which in a one-tab export is the right sheet and in the
+ * event's own workbook is the **Instructions** tab — 158 rows of prose, every
+ * one of which fails validation. The named sheet is chosen when it exists and
+ * the first sheet is still the fallback, so a single-tab CSV export or last
+ * year's spreadsheets read exactly as they did.
+ *
+ * @param {string[]} [opts.prefer] sheet names to look for, best first
+ * @returns {Promise<{headers: string[], rows: Array<Record<string, any>>, sheetName: string|null}>}
+ */
+export async function parseTabular(buffer, filename = '', opts = {}) {
+  const sheets = await parseSheets(buffer, filename);
+  if (!sheets.length) return { headers: [], rows: [], sheetName: null };
+
+  for (const want of opts.prefer || []) {
+    const hit = sheets.find((s) => sheetKey(s.name) === sheetKey(want));
+    if (hit) return tabulate(hit.matrix, hit.name);
+  }
+  return tabulate(sheets[0].matrix, sheets[0].name);
+}
+
+/**
+ * Every sheet whose name is in `names`, in the order asked for. A CSV has no
+ * sheet names, so it comes back as the one unnamed table — which is what makes
+ * "People + Roster" and "a roster CSV" the same call at the other end.
+ *
+ * @returns {Promise<Array<{headers, rows, sheetName}>>} empty if none matched
+ */
+export async function parseNamedSheets(buffer, filename = '', names = []) {
+  const sheets = await parseSheets(buffer, filename);
+  if (!sheets.length) return [];
+  if (sheets.length === 1 && sheets[0].name === null) {
+    return [tabulate(sheets[0].matrix, null)];
+  }
+  const out = [];
+  for (const want of names) {
+    const hit = sheets.find((s) => sheetKey(s.name) === sheetKey(want));
+    if (hit) out.push(tabulate(hit.matrix, hit.name));
+  }
+  return out;
+}
+
+/** @returns {Promise<Array<{name: string|null, matrix: any[][]}>>} */
+async function parseSheets(buffer, filename) {
+  const ext = String(filename).toLowerCase().split('.').pop();
+  if (ext === 'xlsx' || ext === 'xlsm') return parseXlsx(buffer);
+  return [{ name: null, matrix: parseCsv(buffer.toString('utf8')) }];
 }
 
 /** Pick the first present column from a list of accepted header spellings. */

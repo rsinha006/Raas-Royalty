@@ -256,6 +256,13 @@ describe('migrating a database that already has a roster', () => {
 
   test('running it again changes nothing', async () => {
     const { runMigrations } = await import('../server/migrate.js');
+    // Two calls, and the *second* is the assertion. One of the migrations
+    // reacts to data rather than to schema — item 24's `ensureWeekendDays`
+    // derives Thursday and Sunday once a Friday and Saturday are both there,
+    // and this suite's fixture adds Saturday after boot. So the first call here
+    // can legitimately have work to do; what must never happen is work on every
+    // call, which is exactly what a non-empty second return would mean.
+    runMigrations(db);
     assert.deepEqual(runMigrations(db), [], 'a second run should be a no-op');
     assert.equal(db.prepare('SELECT COUNT(*) AS n FROM person_roles').get().n, 5);
   });

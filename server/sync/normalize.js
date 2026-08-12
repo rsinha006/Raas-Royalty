@@ -7,9 +7,42 @@ import { pick } from './parse.js';
  * swap the source, keep this.
  */
 
+/**
+ * The tabs the app reads out of `templates/royalty-schedule-template.xlsx`.
+ *
+ * ⚠️ The workbook has sixteen tabs and the app reads three of them. The other
+ * thirteen — the day grids, Sequences, Slot Times, Checks — are how logistics
+ * *builds* the weekend; Export is the flat answer they compute, and it is the
+ * only schedule tab with any standing here. The first tab is Instructions, so
+ * "just read the first sheet" reads prose.
+ */
+export const SCHEDULE_SHEETS = ['Export'];
+
+/**
+ * Both roster tabs, staff before dancers. They are two tabs rather than one
+ * because they are filled in by different people from different sources, and
+ * they carry different columns: People names a Type per row, Roster is dancers
+ * throughout and says so by being the Roster tab.
+ */
+export const ROSTER_SHEETS = ['People', 'Roster'];
+
+/**
+ * The Roster tab is dancers by definition — the template's own instruction.
+ * Keyed lowercase because the sheet name that comes back is the workbook's own
+ * spelling, and a tab someone retyped as "roster" is the same tab.
+ */
+export const ROSTER_SHEET_DEFAULT_ROLE = { roster: 'dancer' };
+
 export const SCHEDULE_TEMPLATE = {
   columns: [
-    { name: 'Day', required: true, note: 'Fri / Sat (or Friday / Saturday)' },
+    {
+      name: 'Day',
+      required: true,
+      // Matched against `event_days`, which the seed builds as Thursday to
+      // Sunday. A day the database does not have is a per-row refusal, so this
+      // list is the one in the database rather than a fixed pair.
+      note: 'Thu / Fri / Sat / Sun (or Thursday / Friday / Saturday / Sunday)',
+    },
     { name: 'Start', required: true, note: '24h (14:30) or 12h (2:30 PM)' },
     { name: 'End', required: true, note: 'Same formats as Start' },
     { name: 'Location', required: true, note: 'Venue name, e.g. Main Venue' },
@@ -46,6 +79,28 @@ export const ROSTER_TEMPLATE = {
 /** The role a `Captain?` column grants, on top of whatever the Role column says. */
 export const CAPTAIN_ROLE_ID = 'captain';
 
+/**
+ * The People tab's `Type` vocabulary, which is the event's words rather than
+ * ours. Roles stay data — this maps a spelling onto a role id, it does not
+ * define the set. A `Type` with no entry here still resolves if it matches a
+ * role's own label or id, so a role added in the panel needs no code change.
+ */
+export const ROLE_ALIASES = {
+  board: 'exec',
+  'board member': 'exec',
+  'exec board': 'exec',
+  executive: 'exec',
+  director: 'exec',
+  liaison: 'liaison',
+  'head liaison': 'liaison',
+  'judge liaison': 'liaison',
+  judging: 'judge',
+  video: 'videographer',
+  videography: 'videographer',
+  'ras rep': 'ras-rep',
+  'ras representative': 'ras-rep',
+};
+
 const TRUTHY = new Set(['y', 'yes', 'true', '1', 'x', 'captain']);
 
 /**
@@ -60,6 +115,55 @@ export function isCaptainCell(raw) {
 /* ---------------------------- Scalars ---------------------------- */
 
 const pad = (n) => String(n).padStart(2, '0');
+
+/**
+ * Zero-width and direction marks. They survive a copy-paste out of a browser
+ * or a PDF, they are invisible in every spreadsheet, and they make an otherwise
+ * identical name compare unequal — so a re-import creates a second person and
+ * splits one dancer's schedule across two rows nobody can tell apart.
+ */
+const INVISIBLE = /[\u200B-\u200F\u202A-\u202E\u2060\uFEFF]/g;
+
+/**
+ * `\s` already folds the non-breaking and en/em spaces that paste in from the
+ * web; what it does not touch is the zero-width and direction range above, so
+ * that has to go first — otherwise collapsing the whitespace leaves the mark
+ * sitting inside a name that now looks identical to a different string.
+ */
+const clean = (value) =>
+  String(value ?? '')
+    .replace(INVISIBLE, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+/**
+ * A roster name as it should appear on that person's phone.
+ *
+ * ⚠️ The trailing `*` / `**` on last year's roster marks a **food restriction**,
+ * not a captain — confirmed with the event director. Stripping it is this
+ * function's only opinion; `Captain?` is the one thing that makes a captain.
+ */
+export function normalizeName(value) {
+  return clean(value).replace(/[*†‡]+$/, '').trim();
+}
+
+/**
+ * Digits are what a `tel:` link needs; the punctuation is for reading. Five
+ * spellings appeared across the samples — `555-0100`, `(925) 430-8287`,
+ * `(925)-430-8287`, `925.430.8287`, and a bare run of digits — so this returns
+ * one canonical form for the four that carry a full number, and hands anything
+ * else back cleaned but unchanged rather than mangling an extension or a note.
+ */
+export function normalizePhone(value) {
+  const text = clean(value);
+  if (!text) return null;
+  const digits = text.replace(/\D/g, '');
+  if (digits.length === 10) return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+  if (digits.length === 11 && digits[0] === '1') {
+    return `+1-${digits.slice(1, 4)}-${digits.slice(4, 7)}-${digits.slice(7)}`;
+  }
+  return text;
+}
 
 /** Accepts Date (Excel time cells), 0–1 fractions, "2:30 PM", "14:30", "1430". */
 export function normalizeTime(value) {
@@ -216,7 +320,26 @@ function slug(s) {
 }
 
 /**
- * @returns {{rows: ScheduleRow[], errors: Array<{row:number,message:string}>}}
+ * A row carrying one non-empty cell is a note, not a block.
+ *
+ * The Export tab ends with three lines of instructions to whoever maintains it
+ * ("THIS IS THE TAB THE APP READS…"), sitting in the Day column with the other
+ * eight blank. Read literally they are three unreadable blocks, so every import
+ * of a correctly-filled workbook would report errors forever — and an import
+ * that always shows errors is one whose errors stop being read, which is the
+ * only thing standing between the wrong spreadsheet and an empty Saturday.
+ * A block needs a day, a start, an end, an activity and an audience; one cell
+ * can never be one.
+ */
+function isNoteRow(r) {
+  const cells = Array.isArray(r.__cells)
+    ? r.__cells
+    : SCHEDULE_TEMPLATE.columns.map((c) => pick(r, [c.name]));
+  return cells.filter((c) => String(c ?? '').trim() !== '').length <= 1;
+}
+
+/**
+ * @returns {{rows: ScheduleRow[], errors: Array<{row:number,message:string}>, notes: number}}
  *   ScheduleRow: { sourceKey, day, startTime, endTime, venue, subLocation,
  *                  activity, appliesToType, appliesToId, notes }
  */
@@ -226,10 +349,16 @@ export function normalizeScheduleRows(rawRows) {
   const rows = [];
   const errors = [];
   const keyCounts = new Map();
+  let notes = 0;
 
   for (const r of rawRows) {
     const lineNo = r.__row ?? rows.length + 2;
     const problems = [];
+
+    if (isNoteRow(r)) {
+      notes += 1;
+      continue;
+    }
 
     const day = normalizeDay(pick(r, ['Day']), days);
     if (!day) problems.push(`Day "${pick(r, ['Day'])}" is not one of ${days.map((d) => d.key).join(', ')}`);
@@ -284,7 +413,7 @@ export function normalizeScheduleRows(rawRows) {
     });
   }
 
-  return { rows, errors };
+  return { rows, errors, notes };
 }
 
 /* ---------------------------- Roster rows ---------------------------- */
@@ -316,7 +445,44 @@ export function parseContactCell(raw, fallbackName = null) {
   return { name: name || fallbackName || method, phone, email };
 }
 
-export function normalizeRosterRows(rawRows) {
+/**
+ * The Roster tab splits a name across two columns; the CSV template and the
+ * People tab carry it whole. Either way the result is one string, cleaned and
+ * with the food-restriction mark taken off.
+ */
+function rosterName(r) {
+  const whole = normalizeName(pick(r, ['Name', 'Full Name']));
+  if (whole) return whole;
+  const first = normalizeName(pick(r, ['First Name', 'First']));
+  const last = normalizeName(pick(r, ['Last Name', 'Last', 'Surname']));
+  return [first, last].filter(Boolean).join(' ');
+}
+
+/**
+ * The People tab has its own Phone and Email columns rather than the CSV
+ * template's single "Contact Person/Method" cell. Prefer the combined cell when
+ * it is there — it can name someone *else*, which is the whole point of a
+ * dancer's card pointing at their liaison — and otherwise build the card from
+ * this person's own two columns.
+ */
+function rosterContact(r, name) {
+  const combined = pick(r, ['Contact Person/Method', 'Contact', 'Contact Method']);
+  if (String(combined ?? '').trim()) return parseContactCell(combined, name);
+
+  const phone = normalizePhone(pick(r, ['Phone', 'Phone Number', 'Mobile', 'Cell']));
+  const email = clean(pick(r, ['Email', 'Email Address'])) || null;
+  if (!phone && !email) return null;
+  return { name, phone, email };
+}
+
+/**
+ * @param {string|null} [opts.defaultRoleId] the role for rows with no Role/Type
+ *   cell. Set per *sheet*, never guessed per row: the Roster tab is dancers by
+ *   definition, and a People row without a Type is a row somebody has not
+ *   finished, which has to stay an error.
+ */
+export function normalizeRosterRows(rawRows, opts = {}) {
+  const { defaultRoleId = null } = opts;
   const roles = db.prepare('SELECT id, label, selector FROM roles').all();
   const roleByKey = new Map();
   for (const r of roles) {
@@ -324,22 +490,35 @@ export function normalizeRosterRows(rawRows) {
     roleByKey.set(norm(r.label).replace(/s$/, ''), r);
     roleByKey.set(norm(r.id), r);
   }
+  /** An alias only resolves if it lands on a role that exists. */
+  const resolveRole = (raw) => {
+    const key = norm(raw);
+    if (!key) return null;
+    return roleByKey.get(key) || roleByKey.get(norm(ROLE_ALIASES[key])) || null;
+  };
 
   const rows = [];
   const errors = [];
 
   for (const r of rawRows) {
     const lineNo = r.__row ?? rows.length + 2;
+    const sheet = r.__sheet || null;
     const problems = [];
 
-    const name = String(pick(r, ['Name', 'Full Name']) ?? '').trim();
+    const name = rosterName(r);
     if (!name) problems.push('Name is blank');
 
-    const roleRaw = String(pick(r, ['Role']) ?? '').trim();
-    const role = roleByKey.get(norm(roleRaw));
-    if (!role) problems.push(`Role "${roleRaw}" is not a known role`);
+    const roleRaw = clean(pick(r, ['Role', 'Type', 'Position']));
+    const role = roleRaw ? resolveRole(roleRaw) : resolveRole(defaultRoleId);
+    if (!role) {
+      problems.push(
+        roleRaw
+          ? `Role "${roleRaw}" is not a known role`
+          : 'Role is blank, and this sheet has no default role'
+      );
+    }
 
-    const team = String(pick(r, ['Team', 'Team Name']) ?? '').trim();
+    const team = clean(pick(r, ['Team', 'Team Name']));
     if (role && role.selector === 'team' && !team) {
       problems.push(`${role.label} rows need a Team`);
     }
@@ -354,7 +533,7 @@ export function normalizeRosterRows(rawRows) {
     }
 
     if (problems.length) {
-      errors.push({ row: lineNo, message: problems.join('; ') });
+      errors.push({ row: lineNo, sheet, message: problems.join('; ') });
       continue;
     }
 
@@ -365,13 +544,33 @@ export function normalizeRosterRows(rawRows) {
       roleIds: captainRole && captainRole.id !== role.id ? [role.id, captainRole.id] : [role.id],
       isCaptain: Boolean(captainRole),
       teamName: team || null,
-      contact: parseContactCell(
-        pick(r, ['Contact Person/Method', 'Contact', 'Contact Method']),
-        name
-      ),
+      contact: rosterContact(r, name),
       __row: lineNo,
+      __sheet: sheet,
     });
   }
 
+  return { rows, errors };
+}
+
+/**
+ * Read a whole workbook's roster: the People tab and the Roster tab, normalized
+ * into one list. A CSV, or a workbook with neither tab, comes back through the
+ * same call as the single table it is — so the CSV template, last year's
+ * spreadsheets and the real workbook are all one code path, which is what keeps
+ * the tested path and the event-day path the same one.
+ *
+ * @param {Array<{rows: any[], sheetName: string|null}>} sheets from parseNamedSheets
+ */
+export function normalizeRosterSheets(sheets) {
+  const rows = [];
+  const errors = [];
+  for (const sheet of sheets) {
+    const defaultRoleId =
+      ROSTER_SHEET_DEFAULT_ROLE[String(sheet.sheetName ?? '').trim().toLowerCase()] ?? null;
+    const out = normalizeRosterRows(sheet.rows, { defaultRoleId });
+    rows.push(...out.rows);
+    errors.push(...out.errors);
+  }
   return { rows, errors };
 }

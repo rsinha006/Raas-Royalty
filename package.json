@@ -16,6 +16,7 @@
     "seed": "node server/seed.js",
     "seed:reset": "node server/seed.js --reset",
     "codes": "node server/codes.js",
+    "days": "node scripts/event-days.js",
     "preflight": "node scripts/preflight.js",
     "backup": "node scripts/backup.js",
     "restore": "node scripts/restore.js",

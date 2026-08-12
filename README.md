@@ -33,10 +33,17 @@ Codes are managed in the panel's **Access codes** tab, or from the CLI:
 npm run codes -- --list
 ```
 
+The event's dates live in `event_days` and move together:
+
+```bash
+npm run days                          # the four days and how many blocks are on each
+npm run days -- --friday 2027-02-12   # pin the whole weekend from one date
+```
+
 ### Tests
 
 ```bash
-npm test        # 441 tests, no build and no server needed
+npm test        # 488 tests, no build and no server needed
 npm run ci      # what CI runs: the client typecheck and build, then the tests
 ```
 
@@ -240,7 +247,7 @@ live. Force Re-sync re-applies the last uploaded file.
 | Setting | Effect |
 | --- | --- |
 | `SCHEDULE_SOURCE=url` + `SCHEDULE_SOURCE_URL` | Pull a Google Sheet published as CSV. No credentials. |
-| `SCHEDULE_SOURCE=google_sheets` + `GOOGLE_SHEET_ID` + `GOOGLE_API_KEY` | Sheets API v4. |
+| `SCHEDULE_SOURCE=google_sheets` + `GOOGLE_SHEET_ID` + `GOOGLE_API_KEY` | Sheets API v4. `GOOGLE_SHEET_RANGE` defaults to `Export!A:I`. |
 | `SYNC_POLL_SECONDS=60` | Poll that source and push changes to every open phone. |
 
 ### Spreadsheet templates
@@ -253,6 +260,30 @@ Roster: `Name, Role, Team, Contact Person/Method`
 Downloadable from the admin Overview tab. Times accept `14:30`, `2:30 PM`, or
 `1430`. The assignment column matches a team name, a person's name, or
 `All <Role>`; prefix with `Team:`, `Person:`, or `Role:` to force one.
+
+### The event's own workbook
+
+`templates/royalty-schedule-template.xlsx` is what logistics actually fills in —
+sixteen tabs, of which the app reads three **by name**:
+
+| Tab | What it is |
+| --- | --- |
+| `Export` | The schedule, in the nine columns above. Calculated by the workbook; nobody types on it. |
+| `People` | Staff. `Full Name` and a `Type` — `board`, `liaison`, `judge`, `videographer`, `RAS Rep` — plus `Phone` and `Email`. |
+| `Roster` | Dancers. `First Name` + `Last Name`, `Team`, `Captain?`. |
+
+An upload that has none of them falls back to the first sheet, so the CSV
+templates above are unaffected. A roster upload reads both tabs at once.
+
+⚠️ **The four day grids and the Airport tab reach nothing.** `Export` is
+computed from Sequences, Slot Times, Windows and Manual Blocks and no fourth
+place, so anything typed only on a day grid or on Airport looks complete and
+changes no phone. ⚠️ **Publish or export `Export` from Google Sheets rather than
+sending the file the formulas live in** — a copy with nothing calculated is an
+empty schedule, and the import refuses it rather than applying it.
+
+The full order of operations, plus what still has to be authored, is in
+[docs/loading-data.md](docs/loading-data.md).
 
 Rows are matched across syncs by `day + assignment + activity`, so a block that
 moves is recorded as an **update**, not a delete plus a create — which keeps the

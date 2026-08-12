@@ -135,7 +135,11 @@ const googleSheetsSource = {
   async pull() {
     const id = process.env.GOOGLE_SHEET_ID;
     const key = process.env.GOOGLE_API_KEY;
-    const range = process.env.GOOGLE_SHEET_RANGE || 'Schedule!A:I';
+    // `Export` is the tab the event's template calculates and the only one the
+    // app reads; A:I is its nine columns. The old default named a `Schedule`
+    // tab, which no version of the workbook has ever had — so the out-of-the-box
+    // configuration asked Google for a range that does not exist.
+    const range = process.env.GOOGLE_SHEET_RANGE || 'Export!A:I';
     if (!id || !key) {
       throw new Error(
         'Google Sheets sync is not configured. Set GOOGLE_SHEET_ID and GOOGLE_API_KEY, then set SCHEDULE_SOURCE=google_sheets.'

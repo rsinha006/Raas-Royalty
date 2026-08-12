@@ -35,11 +35,12 @@ import {
   updateBlock,
 } from '../lib/mutations.js';
 import { ingest, pullAndSync, syncStatus } from '../sync/index.js';
-import { parseTabular } from '../sync/parse.js';
+import { parseNamedSheets } from '../sync/parse.js';
 import {
+  ROSTER_SHEETS,
   ROSTER_TEMPLATE,
   SCHEDULE_TEMPLATE,
-  normalizeRosterRows,
+  normalizeRosterSheets,
 } from '../sync/normalize.js';
 import { applyRosterDiff, computeRosterDiff } from '../sync/diff.js';
 import { uploadSource } from '../sync/sources.js';
@@ -863,16 +864,22 @@ export function adminRouter({ broadcast }) {
   router.post('/roster/import/preview', upload.single('file'), async (req, res) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     try {
-      const parsed = await parseTabular(req.file.buffer, req.file.originalname);
-      const { rows, errors } = normalizeRosterRows(parsed.rows);
+      const sheets = await parseNamedSheets(req.file.buffer, req.file.originalname, ROSTER_SHEETS);
+      if (!sheets.length) {
+        return res.status(400).json({
+          error: `That workbook has no ${ROSTER_SHEETS.join(' or ')} tab. Upload the event template, or a single-sheet CSV.`,
+        });
+      }
+      const { rows, errors } = normalizeRosterSheets(sheets);
       const diff = computeRosterDiff(rows, { removeMissing: req.body.removeMissing === 'true' });
       const token = stashPending('roster', req.file.buffer, req.file.originalname);
       res.json({
         ok: true,
         token,
         filename: req.file.originalname,
-        headers: parsed.headers,
-        parsedRows: parsed.rows.length,
+        sheetNames: sheets.map((s) => s.sheetName).filter(Boolean),
+        headers: sheets[0].headers,
+        parsedRows: sheets.reduce((n, s) => n + s.rows.length, 0),
         validRows: rows.length,
         errors,
         diff,
@@ -887,8 +894,8 @@ export function adminRouter({ broadcast }) {
     const rec = takePending(req.body?.token, 'roster');
     if (!rec) return res.status(410).json({ error: 'That preview expired. Upload the file again.' });
     try {
-      const parsed = await parseTabular(rec.buffer, rec.filename);
-      const { rows, errors } = normalizeRosterRows(parsed.rows);
+      const sheets = await parseNamedSheets(rec.buffer, rec.filename, ROSTER_SHEETS);
+      const { rows, errors } = normalizeRosterSheets(sheets);
       if (!rows.length) {
         return res.status(400).json({ error: 'Every row failed validation — nothing was applied.', errors });
       }

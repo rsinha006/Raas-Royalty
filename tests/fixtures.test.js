@@ -29,8 +29,10 @@ process.env.NODE_ENV = 'test';
 process.env.EVENT_TIMEZONE = 'America/Indiana/Indianapolis';
 
 const { db } = await import('../server/db.js');
-const { parseTabular } = await import('../server/sync/parse.js');
-const { normalizeRosterRows, normalizeScheduleRows } = await import('../server/sync/normalize.js');
+const { parseNamedSheets, parseTabular } = await import('../server/sync/parse.js');
+const { ROSTER_SHEETS, normalizeRosterRows, normalizeScheduleRows } = await import(
+  '../server/sync/normalize.js'
+);
 const { ingest } = await import('../server/sync/index.js');
 const { listAllBlocks } = await import('../server/lib/queries.js');
 
@@ -182,15 +184,28 @@ describe('uploading last year’s workbook', () => {
   });
 
   test('nor for the roster template — a real roster is not a filled-in one', async () => {
-    // The roster fixture has First Name and Last Name in two columns, no Role
-    // column at all, and the team only in the sheet tab. It reads as 25 rows
-    // and none of them is importable, which is the point: assembling a roster
-    // out of this is content work, not a mapping.
+    // The roster fixture has First Name and Last Name in two columns and the
+    // team only in the sheet tab. Item 24 taught the reader to join those two
+    // columns, so the *names* now come through — and the rows are still not
+    // importable, because there is no Role column and this is not a sheet
+    // entitled to a default one. That is the point the fixture exists to make:
+    // assembling a roster out of last year's file is content work, not a
+    // mapping, and the missing half is which position each person holds.
     const roster = parsed.find((f) => f.name === ROSTER);
     const { rows, errors } = normalizeRosterRows(roster.rows);
     assert.equal(rows.length, 0);
     assert.equal(errors.length, roster.rows.length);
-    assert.match(errors[0].message, /Name is blank|is not a known role/);
+    assert.match(errors[0].message, /Role is blank|is not a known role/);
+  });
+
+  test('and it is refused at the route, because it has no People or Roster tab', async () => {
+    // The tabs in last year's file are team names. `parseNamedSheets` matching
+    // nothing is what turns "every row failed validation" into "that is not
+    // this workbook" — a difference that matters when the person uploading it
+    // is at a check-in desk rather than at a keyboard.
+    const roster = parsed.find((f) => f.name === ROSTER);
+    const sheets = await parseNamedSheets(roster.buffer, roster.name, ROSTER_SHEETS);
+    assert.equal(sheets.length, 0);
   });
 
   test('the preview says so without writing anything', async () => {

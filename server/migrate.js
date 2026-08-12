@@ -225,8 +225,90 @@ export function runMigrations(db) {
    * on the boot line would make a routine self-heal look like a migration.
    */
   backfillTargetVersions(db);
+  ensureEventRoles(db);
+  if (ensureWeekendDays(db)) applied.push('event_days: Thursday and Sunday');
 
   return applied;
+}
+
+/**
+ * Add Thursday and Sunday to a database that was seeded with only Friday and
+ * Saturday.
+ *
+ * The event is four days: the template has a grid for each, teams land on
+ * Thursday and fly out on Sunday, and those arrivals and departures are
+ * person-targeted blocks somebody reads standing in an airport. A block whose
+ * `Day` has no `event_days` row is refused per row, so on a two-day database
+ * every one of them is dropped — and the import reports it as skipped rows in a
+ * list nobody rereads once the count stops going down.
+ *
+ * ⚠️ The dates are *derived, not invented*: Thursday is the day before Friday
+ * and Sunday the day after Saturday, which is arithmetic on a contiguous
+ * weekend and the same assumption `planEventDates` and the template's own
+ * "Event Friday date" box both make. It runs only when Friday and Saturday are
+ * genuinely adjacent — if someone has re-dated them into a shape this does not
+ * understand, it does nothing rather than guessing, and `npm run days` is how
+ * that gets fixed. `sort_order` is set outside the existing range rather than
+ * renumbering, so nothing that already sorts moves.
+ */
+export function ensureWeekendDays(db) {
+  const days = db.prepare('SELECT key, date, sort_order FROM event_days').all();
+  if (!days.length) return false; // A fresh database; the seed owns this.
+  const by = new Map(days.map((d) => [d.key, d]));
+  const fri = by.get('Fri');
+  const sat = by.get('Sat');
+  if (!fri || !sat) return false;
+
+  const DAY_MS = 86_400_000;
+  const friAt = Date.parse(`${fri.date}T00:00:00Z`);
+  const satAt = Date.parse(`${sat.date}T00:00:00Z`);
+  if (!Number.isFinite(friAt) || satAt - friAt !== DAY_MS) return false;
+
+  const iso = (ms) => new Date(ms).toISOString().slice(0, 10);
+  const wanted = [
+    { key: 'Thu', label: 'Thursday', date: iso(friAt - DAY_MS), sort: fri.sort_order - 1 },
+    { key: 'Sun', label: 'Sunday', date: iso(satAt + DAY_MS), sort: sat.sort_order + 1 },
+  ].filter((d) => !by.has(d.key));
+  if (!wanted.length) return false;
+
+  const insert = db.prepare(
+    'INSERT INTO event_days (key, label, date, sort_order) VALUES (?, ?, ?, ?)'
+  );
+  db.transaction(() => {
+    for (const d of wanted) insert.run(d.key, d.label, d.date, d.sort);
+  })();
+  return true;
+}
+
+/**
+ * The two positions the real roster has and the placeholder seed never did.
+ *
+ * Liaisons are most of last year's master schedule — the tab has five rows per
+ * team plus five judge liaisons — and RAS reps get a row each because they move
+ * independently. Without these, every one of those People rows fails its import
+ * on `Role "liaison" is not a known role`, which is a stop at exactly the wrong
+ * moment: the roster arrives late by construction (item 24), and the person
+ * loading it is not the person who can decide what a role should be called.
+ *
+ * ⚠️ Roles stay data. This inserts two rows that were missing and asserts
+ * nothing about the rest — `INSERT OR IGNORE`, so a label or selector changed
+ * in the panel is never dragged back, and a role deleted on purpose stays
+ * deleted only until the next boot, which is the price of not needing a deploy
+ * to add one. Both are `person` selectors: they are reached by name and carry
+ * their own access code, like every other staff position.
+ */
+export function ensureEventRoles(db) {
+  const roles = [
+    { id: 'liaison', label: 'Liaison', selector: 'person', blurb: 'Find your name', sort: 7 },
+    { id: 'ras-rep', label: 'RAS Rep', selector: 'person', blurb: 'Find your name', sort: 8 },
+  ];
+  const insert = db.prepare(
+    `INSERT OR IGNORE INTO roles (id, label, selector, blurb, sort_order, active)
+     VALUES (?, ?, ?, ?, ?, 1)`
+  );
+  db.transaction(() => {
+    for (const r of roles) insert.run(r.id, r.label, r.selector, r.blurb, r.sort);
+  })();
 }
 
 /**

@@ -21,9 +21,10 @@ otherwise the reasoning is lost between sessions and gets re-litigated.
 npm install && npm run seed && npm run build && npm start   # http://localhost:4000
 npm run dev          # hot reload: client :5173, API :4000
 npm run seed:reset   # rebuild placeholder data from scratch
-npm test             # 441 tests
+npm test             # 488 tests
 npm run ci           # what CI runs: the client typecheck and build, then the tests
 npm run codes -- --list   # every live access code and its subject
+npm run days              # the four event days; --friday YYYY-MM-DD moves them all
 npm run load-test         # 600 virtual phones against an isolated fixture DB
 npm run preflight         # the production config checks, against this environment
 npm run backup            # a verified snapshot now; --list shows what is kept
@@ -85,11 +86,40 @@ exist yet. Everything in either file must stay idempotent.
 **One import pipeline.** `bytes → parseTabular → normalizeScheduleRows →
 computeScheduleDiff → apply`. Manual upload, force re-sync, and background
 polling all call `ingest()`. Keep it that way — swapping in live Google Sheets
-sync is meant to be an env-var change, not a rewrite. Two invariants inside it
-are load-bearing and tested: a row's `sourceKey` **excludes time and location**,
+sync is meant to be an env-var change, not a rewrite. Four invariants inside it
+are load-bearing and tested. A row's `sourceKey` **excludes time and location**,
 so a block that moved is an update rather than a delete plus a create; and an
 import owns exactly the rows carrying a `source_key`, so seed and hand-added
-blocks stay invisible to the diff, `removeMissing` included.
+blocks stay invisible to the diff, `removeMissing` included. ⚠️ **The reader
+takes named tabs, not `worksheets[0]`** — `Export` for the schedule, `People` and
+`Roster` for the roster, falling back to the first sheet so a CSV still works;
+the event's workbook has sixteen tabs and the first is Instructions, which reads
+as 158 rows of prose. ⚠️ **An import that yields zero rows is refused even when
+nothing errored**, because `Export` is entirely formulas: a copy saved by
+anything that does not calculate them reads as a few note rows and no errors at
+all, and applying that against `removeMissing` deletes every managed block
+behind a green result. A row with one non-empty cell is a note (the Export tab
+ends with three), not five errors on every correct import.
+
+**The roster is two tabs, and a default role belongs to a sheet.** `People`
+carries `Full Name` and a `Type` in the event's vocabulary; `Roster` splits the
+name across two columns and is dancers throughout. One upload reads both and
+every error names its tab — they both have a row 2. ⚠️ The Roster tab defaults
+to Dancer because *the tab* says so; a `People` row with a blank `Type` is
+unfinished and must stay an error, never a guess. The trailing `*` on a name is
+a food restriction and comes off; `Captain?` is the only thing that makes a
+captain, in both directions.
+
+**The event is four days, and `event_days` is data.** Thursday to Sunday: teams
+land on the first and fly out on the last, and those are person-targeted blocks
+read at an airport. A block whose `Day` has no row is refused per row, so a
+missing day is a silent hole rather than an error. Dates move with `npm run
+days`, which never touches the keys — `schedule_blocks.day` is a foreign key
+onto them and `Sat` means "the third day". ⚠️ Both the script and the migration
+that backfills Thursday and Sunday **derive rather than invent**: a date that is
+not the weekday it was given as is refused, and a non-contiguous weekend is left
+alone, because all four days move together and one wrong date still renders as a
+perfectly plausible schedule.
 
 **The server owns time, the client owns its passing.** Blocks ship with
 absolute `startsAt`/`endsAt` resolved against the venue's zone; the client only
@@ -182,13 +212,17 @@ because nothing running in this process can report that this process stopped.
 and keep it at one indexed row. Runbook: [docs/ops.md](docs/ops.md).
 
 Data model and spreadsheet templates are documented in [README.md](README.md).
+Loading the real roster and schedule — the order, the tabs, and the two that
+reach nothing — is [docs/loading-data.md](docs/loading-data.md).
 
 ## Current state
 
 Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13, 14, 19,
-20, 22 and 23 are done; item 21's accessibility half is done and its hardware half
-is a checklist in [docs/device-matrix.md](docs/device-matrix.md) — see
-[PLAN.md](PLAN.md) for what each one settled. In short: the viewer is behind
+20, 22 and 23 are done. Item 21's accessibility half is done and its hardware
+half is a checklist in [docs/device-matrix.md](docs/device-matrix.md); item 24's
+engineering half is done and its content half is a gap list in
+[docs/loading-data.md](docs/loading-data.md) — see [PLAN.md](PLAN.md) for what
+each one settled. In short: the viewer is behind
 access codes enforced server-side, event times are resolved against the venue's
 timezone by the server, changes reach only the people they affect, each person's
 "last updated" is their own, concurrent admin edits are refused rather than
@@ -201,14 +235,21 @@ rather than assumed, the screen is navigable by heading, by keyboard and by
 screen reader with every colour measured against AA, a production deploy cannot
 come up with the default password or on a disk the next push wipes, the event
 data is copied off the machine every few minutes and verified on the way out,
-and 441 tests run in CI.
+the event's own sixteen-tab workbook loads through the same pipeline as
+everything else, and 488 tests run in CI.
 
 Still not true: **nothing is actually deployed** — item 22 built the config, the
 guardrails and the runbook, but `fly deploy` needs an account and has not been
 run, and the image has never been built. Item 23's snapshots, health check and
 alerting are built and exercised locally, but the backup target, the heartbeat
 and the alert webhook have nothing real to point at until there is a deploy.
-And no real data.
+
+**And still no real data** — which is now the only thing in the way. Item 24
+built and demonstrated the path from the workbook into the database; what is
+missing is what goes in it: the real dates (the placeholder is 2026-08-07, which
+has passed), ~80 staff against 6 example rows, ~200 dancers against 1, and
+Thursday, Friday and Sunday, which are almost entirely the Manual Blocks tab and
+have one example row between them.
 
 The design decisions that were blocking are settled in
 [docs/decisions.md](docs/decisions.md) — read it before changing the data model,

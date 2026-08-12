@@ -6,9 +6,15 @@ interface SchedulePreview {
   token: string;
   filename: string;
   headers: string[];
+  /** The tab the rows came off — `Export` for the event template, null for a CSV. */
+  sheetName: string | null;
   parsedRows: number;
   validRows: number;
+  /** Rows carrying a single cell: the Export tab's own footnotes, skipped rather than reported. */
+  noteRows: number;
   errors: { row: number; message: string }[];
+  /** Why this file cannot be applied, or null. Set before Apply is ever pressed. */
+  refusal: string | null;
   removeMissing: boolean;
   diff: {
     create: { label: string }[];
@@ -22,9 +28,11 @@ interface SchedulePreview {
 interface RosterPreview {
   token: string;
   filename: string;
+  /** Both roster tabs, in the order they were read. */
+  sheetNames: string[];
   parsedRows: number;
   validRows: number;
-  errors: { row: number; message: string }[];
+  errors: { row: number; sheet?: string | null; message: string }[];
   diff: {
     createTeams: { name: string }[];
     createContacts: { name: string | null }[];
@@ -251,9 +259,19 @@ export default function ImportPanel({ onChanged }: { onChanged: () => void }) {
           <div style={{ marginTop: 16 }}>
             <h4 className="section-title">Preview — nothing has been applied yet</h4>
             <p className="small muted">
-              {schedulePreview.filename} · {schedulePreview.validRows} of{' '}
-              {schedulePreview.parsedRows} rows valid · {schedulePreview.diff.unchanged} unchanged
+              {schedulePreview.filename}
+              {schedulePreview.sheetName ? ` · ${schedulePreview.sheetName} tab` : ''} ·{' '}
+              {schedulePreview.validRows} of {schedulePreview.parsedRows} rows valid ·{' '}
+              {schedulePreview.diff.unchanged} unchanged
+              {schedulePreview.noteRows > 0 ? ` · ${schedulePreview.noteRows} note rows ignored` : ''}
             </p>
+
+            {schedulePreview.refusal && (
+              <div className="banner warn" style={{ marginTop: 10 }}>
+                <span aria-hidden="true">⛔</span>
+                <span>{schedulePreview.refusal}</span>
+              </div>
+            )}
 
             {schedulePreview.errors.length > 0 && (
               <div className="banner info" style={{ marginTop: 10 }}>
@@ -289,7 +307,7 @@ export default function ImportPanel({ onChanged }: { onChanged: () => void }) {
             <div className="row" style={{ marginTop: 14 }}>
               <button
                 className="btn primary"
-                disabled={busy || !schedulePreview.diff.hasChanges}
+                disabled={busy || !schedulePreview.diff.hasChanges || Boolean(schedulePreview.refusal)}
                 onClick={commitSchedule}
               >
                 {busy ? 'Applying…' : 'Apply & push live'}
@@ -362,8 +380,10 @@ export default function ImportPanel({ onChanged }: { onChanged: () => void }) {
           <div style={{ marginTop: 16 }}>
             <h4 className="section-title">Preview — nothing has been applied yet</h4>
             <p className="small muted">
-              {rosterPreview.filename} · {rosterPreview.validRows} of {rosterPreview.parsedRows} rows
-              valid · {rosterPreview.diff.unchanged} unchanged
+              {rosterPreview.filename}
+              {rosterPreview.sheetNames?.length ? ` · ${rosterPreview.sheetNames.join(' + ')} tab` : ''}
+              {rosterPreview.sheetNames?.length > 1 ? 's' : ''} · {rosterPreview.validRows} of{' '}
+              {rosterPreview.parsedRows} rows valid · {rosterPreview.diff.unchanged} unchanged
             </p>
 
             {rosterPreview.errors.length > 0 && (
@@ -372,10 +392,15 @@ export default function ImportPanel({ onChanged }: { onChanged: () => void }) {
                   {rosterPreview.errors.length} row(s) will be skipped:
                   <ul style={{ margin: '6px 0 0 16px', padding: 0 }}>
                     {rosterPreview.errors.slice(0, 8).map((e) => (
-                      <li key={e.row}>
-                        Row {e.row}: {e.message}
+                      // Both tabs have a row 2, so the tab name is what makes
+                      // "row 2" mean anything.
+                      <li key={`${e.sheet ?? ''}:${e.row}`}>
+                        {e.sheet ? `${e.sheet} row ${e.row}` : `Row ${e.row}`}: {e.message}
                       </li>
                     ))}
+                    {rosterPreview.errors.length > 8 && (
+                      <li>…and {rosterPreview.errors.length - 8} more</li>
+                    )}
                   </ul>
                 </span>
               </div>

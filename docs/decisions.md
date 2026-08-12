@@ -1222,3 +1222,123 @@ stores without a SigV4 implementation living in this repo.
 nothing verified for three intervals. One failed upload during venue wifi is not
 worth walking away from the check-in desk for, and an alert channel that cries
 wolf is muted before the event starts.
+
+## The app reads three named tabs, not the first sheet
+
+**Date:** 2026-08-11 · **Status:** decided
+
+**Question.** The importer read `worksheets[0]`. The event's own workbook has
+sixteen tabs and the first one is Instructions. How does the reader find the
+schedule?
+
+**Decision.** `parseTabular` takes a `prefer` list of sheet names — `Export` for
+the schedule, `People` and `Roster` for the roster — and falls back to the first
+sheet when none of them is there. Matching is case- and space-insensitive. A
+roster upload reads *both* tabs and concatenates them, and each row carries the
+tab it came off so an error can name it.
+
+**Why.** The alternative was a column-and-sheet mapping UI, which item 3 already
+rejected for the columns and which is worse here: the tab names are ours to fix,
+they are written down in the workbook's own Instructions, and a mapping screen
+is one more thing to get wrong at 1am. The fallback is what keeps the CSV
+template, a published single-tab export and last year's spreadsheets all reading
+exactly as they did — the named sheet is an addition, not a replacement.
+
+⚠️ Reading the first sheet was not a small bug. Against the real template it
+produced 158 rows of prose, every one of which failed validation, which is
+indistinguishable from "you uploaded the wrong file" — so the diagnosis on the
+day would have been to go looking for a different workbook.
+
+**Rejected: reading the day grids.** They are merged Gantt wall charts, which is
+the decoder item 3 declined to build. The workbook computes `Export` from the
+pipelines, the meal windows and Manual Blocks precisely so that nothing has to.
+The cost is that anything typed only on a day grid never reaches a phone, which
+is now written in three places including the workbook itself.
+
+## An import that yields nothing is refused, even when nothing failed
+
+**Date:** 2026-08-11 · **Status:** decided
+
+**Question.** The guard against a malformed file emptying the schedule was
+`errors.length && rows.length === 0`. Is "rows failed" the right condition?
+
+**Decision.** No — the condition is `rows.length === 0`, whether or not anything
+errored. It is computed once as a `refusal` and reported on the preview as well
+as the commit, so Apply is disabled rather than being the thing that finds out.
+
+**Why.** The two conditions differ by exactly one case, and it is a real one:
+the template's `Export` tab is entirely formulas, so a copy saved by anything
+that does not calculate them reads as a few note rows and **no errors at all**,
+because there is nothing there to be wrong. Under the old guard that file was
+applied — an empty row set against `removeMissing`, which is every managed block
+deleted, silently, behind a green result. There is no file for which the correct
+outcome is "delete the whole schedule"; clearing the placeholder blocks is a
+separate action that names what it does.
+
+The same reasoning covers note rows. The `Export` tab ends with three lines of
+instructions to its own maintainer, sitting in the Day column with the other
+eight cells blank. Read literally they are three unreadable blocks on every
+import of a *correct* workbook — and an import that always shows errors is one
+whose errors stop being read, which is the only thing standing between the wrong
+spreadsheet and an empty Saturday. A row with one non-empty cell is therefore a
+note and is counted, not reported. The rule is one cell, not "fewer than nine":
+a half-filled row is a mistake someone made and has to hear about.
+
+## Event dates move by script; the days themselves are four
+
+**Date:** 2026-08-11 · **Status:** decided
+
+**Question.** Item 24 says to pin the real dates. `event_days` is written by the
+seed, and the seed refuses to run against a populated database. So how?
+
+**Decision.** `npm run days` — list, or set the whole weekend from any one day.
+Dates only: the keys never move, and days cannot be added or removed there. The
+seed now creates four days rather than two, and a migration derives Thursday and
+Sunday for databases that already exist.
+
+**Why.** Before this, changing a date meant `npm run seed:reset`, which rebuilds
+the placeholder roster over the real one and rotates every access code already
+mailed out — a trap with the roster on one side of it and the dates on the
+other, and item 24 needs both. Re-dating is safe because `schedule_blocks.day`
+is a foreign key onto `event_days.key` and `Sat` means "the third day", not any
+particular date, so every block moves with its day and nothing is orphaned.
+
+**Four days, because the event is four days.** The template has a grid for each,
+teams land on Thursday and fly out on Sunday, and those are person-targeted
+blocks somebody reads standing in an airport. A block whose `Day` has no
+`event_days` row is refused per row — so on a two-day database every arrival and
+departure is dropped, and it is reported as a count of skipped rows that stops
+being read once it stops going down.
+
+⚠️ **Derived, never invented.** The migration adds Thursday and Sunday only when
+the Friday and Saturday already in the database are genuinely adjacent, and the
+script refuses a date that is not the weekday it was given as. Both refusals
+exist for the same reason: all four days move together, so one wrong date shifts
+the entire weekend, and the result still renders as a completely plausible
+schedule. That is the failure mode item 9 exists to prevent, arriving through
+the setup step instead of through the clock.
+
+## Liaison and RAS Rep are roles the migration guarantees
+
+**Date:** 2026-08-11 · **Status:** decided
+
+**Question.** The People tab names positions in the event's vocabulary —
+`board`, `liaison`, `judge`, `videographer`, `RAS Rep`. The seed's role list has
+no Liaison and no RAS Rep. Map them, create them, or refuse them?
+
+**Decision.** Both: an alias table maps the event's spellings onto role ids, and
+`ensureEventRoles` inserts `liaison` and `ras-rep` idempotently on every boot.
+An alias only resolves if it lands on a role that exists, and a `Type` with no
+alias still resolves against a role's own label or id.
+
+**Why.** Roles are data (item 3), so the alias table maps spellings and does not
+define the set — a role added in the panel needs no code change, which is the
+property that decision bought. But liaisons are most of last year's master
+schedule, five rows per team plus five judge liaisons, and refusing all of them
+on `Role "liaison" is not a known role` is a stop at exactly the wrong moment:
+the roster arrives late by construction, and the person loading it is not the
+person who can decide what a role should be called.
+
+Both are `person` selectors, so they are reached by name and carry their own
+access code like every other staff position — which is what puts them in the
+personal-code list and keeps dancers out of it, unchanged.

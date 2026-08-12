@@ -22,3 +22,16 @@ samples/
 # Root level only — fixtures/*.xlsx stays committable, which is where a
 # spreadsheet safe to publish belongs.
 /*.xlsx
+
+# The blank template IS committed. It is the deliverable logistics fills in, and
+# tests/template.test.js reads it to check that its tabs and columns still match
+# what the importer looks for — so if it stops being tracked, that check stops
+# being run anywhere but this laptop.
+#
+# ⚠️ It is committed on the understanding that the *filled* copy lives in Google
+# Sheets and never comes back here. Anything else that lands in templates/ is
+# assumed to be a filled-in copy carrying ~280 real names and phone numbers, and
+# is ignored on that basis. If you have to work on a filled copy locally, keep
+# it out of this directory.
+/templates/*
+!/templates/royalty-schedule-template.xlsx

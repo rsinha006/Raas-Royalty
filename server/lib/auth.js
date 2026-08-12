@@ -10,13 +10,25 @@ import { db, getMeta, setMeta } from '../db.js';
 const COOKIE = 'royalty_admin';
 const TTL_MS = 1000 * 60 * 60 * 24; // 24h — long enough for the whole event
 
+/**
+ * The signing key for both session cookies.
+ *
+ * `SESSION_SECRET` wins, and when it is set nothing is written to the database
+ * at all — the generated fallback exists for development, and storing one
+ * anyway would leave a live signing key inside the file item 23 copies off-box
+ * every few minutes. The fallback still persists across restarts, so a
+ * developer is not signed out by every reload; what it does not survive is the
+ * volume being rebuilt, which is why the deploy gate requires the env form.
+ */
 function secret() {
+  const pinned = process.env.SESSION_SECRET;
+  if (pinned) return pinned;
   let s = getMeta('session_secret');
   if (!s) {
     s = crypto.randomBytes(32).toString('hex');
     setMeta('session_secret', s);
   }
-  return process.env.SESSION_SECRET || s;
+  return s;
 }
 
 export function adminPassword() {

@@ -12,8 +12,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
-      # Not belt and braces: the deploy target is still open (item 22), so the
-      # floor in package.json's `engines` and the current LTS both have to pass.
+      # Not belt and braces. 22 is what actually deploys — the Dockerfile pins
+      # node:22-bookworm-slim — and 20 is the floor in package.json's `engines`,
+      # which the load-test and seed scripts are still run under locally.
       fail-fast: false
       matrix:
         node: ['20', '22']

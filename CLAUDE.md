@@ -21,11 +21,14 @@ otherwise the reasoning is lost between sessions and gets re-litigated.
 npm install && npm run seed && npm run build && npm start   # http://localhost:4000
 npm run dev          # hot reload: client :5173, API :4000
 npm run seed:reset   # rebuild placeholder data from scratch
-npm test             # 353 tests
+npm test             # 385 tests
 npm run ci           # what CI runs: the client typecheck and build, then the tests
 npm run codes -- --list   # every live access code and its subject
 npm run load-test         # 600 virtual phones against an isolated fixture DB
+npm run preflight         # the production config checks, against this environment
 ```
+
+Deploying is Fly.io, one machine, one volume — [docs/deploy.md](docs/deploy.md).
 
 Admin at `/admin` (password `royalty-admin` by default — set
 `ADMIN_PASSWORD`). The viewer needs an access code: open `/s/:code` from the
@@ -52,7 +55,7 @@ React/Vite bundle from `client/dist`. No external services.
 - `client/src/viewer/` — the participant app
 - `client/src/admin/` — the logistics panel
 
-Nine things worth knowing before changing anything:
+Twelve things worth knowing before changing anything:
 
 **Block targets are four-way, and the fourth is not like the others.** A block
 targets a team, a person, a role, or `everyone` — the announcement audience,
@@ -143,13 +146,28 @@ choice can rescue it — and a `var(--x)` with no declaration and no fallback is
 a silent wrong colour, which is what `var(--accent)` was. The full audit and
 the open hardware checks are in [docs/device-matrix.md](docs/device-matrix.md).
 
+**The deploy is one machine, and persistent state lives beside the database.**
+A Fly volume attaches to a single machine, so a second machine is a second,
+empty database behind the same hostname — not more capacity. `--ha=false` and
+`min_machines_running = 1` are load-bearing, and a test asserts the second.
+⚠️ **Anything that has to survive a restart derives its path from `dataDir` in
+`db.js`, never from `__dirname`.** In development the two are the same `data/`
+folder, so this class of bug has no local symptom at all: on the machine the
+application directory is rebuilt by every deploy, and a file written relative to
+the source tree is silently discarded. That is exactly what had happened to the
+re-sync cache in `sync/sources.js`. `server/lib/deploy-config.js` refuses to
+boot in production on four settings that would each otherwise produce a server
+passing its own health check; `npm run preflight` runs the same checks strictly.
+New checks go in at `warn`, because a 2am restart must not be blocked by a
+missing hostname. Runbook: [docs/deploy.md](docs/deploy.md).
+
 Data model and spreadsheet templates are documented in [README.md](README.md).
 
 ## Current state
 
-Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13, 14, 19
-and 20 are done; item 21's accessibility half is done and its hardware half is a
-checklist in [docs/device-matrix.md](docs/device-matrix.md) — see
+Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13, 14, 19,
+20 and 22 are done; item 21's accessibility half is done and its hardware half
+is a checklist in [docs/device-matrix.md](docs/device-matrix.md) — see
 [PLAN.md](PLAN.md) for what each one settled. In short: the viewer is behind
 access codes enforced server-side, event times are resolved against the venue's
 timezone by the server, changes reach only the people they affect, each person's
@@ -160,9 +178,14 @@ exactly what any one person sees, a change can be put back, "fire alarm,
 evacuate" is one block rather than six, an upload of the wrong spreadsheet is
 refused rather than half-applied, 600 concurrent phones have been measured
 rather than assumed, the screen is navigable by heading, by keyboard and by
-screen reader with every colour measured against AA, and 353 tests run in CI.
+screen reader with every colour measured against AA, a production deploy cannot
+come up with the default password or on a disk the next push wipes, and 385
+tests run in CI.
 
-Still not true: no deployment and no real data.
+Still not true: **nothing is actually deployed** — item 22 built the config, the
+guardrails and the runbook, but `fly deploy` needs an account and has not been
+run, and the image has never been built. No backups or monitoring either
+(item 23). And no real data.
 
 The design decisions that were blocking are settled in
 [docs/decisions.md](docs/decisions.md) — read it before changing the data model,

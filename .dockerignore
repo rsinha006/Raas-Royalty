@@ -1,0 +1,32 @@
+# Keep the build context small and, more importantly, keep participant data out
+# of an image that gets pushed to a registry.
+
+node_modules/
+client/node_modules/
+client/dist/
+
+# The live database and its WAL. The deployed one lives on a volume at /data;
+# copying a local one in would ship a developer's data and then be shadowed by
+# the mount anyway.
+data/
+
+.env
+.git/
+.github/
+.DS_Store
+*.log
+
+# Real rosters and past master schedules — same reasoning as .gitignore, and it
+# matters more here because an image is pushed somewhere.
+samples/
+/*.xlsx
+~$*
+
+# Not needed to serve the event.
+tests/
+fixtures/
+docs/
+templates/
+PLAN.md
+CLAUDE.md
+README.md

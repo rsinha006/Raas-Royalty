@@ -1,9 +1,21 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CACHE_DIR = path.join(__dirname, '..', '..', 'data');
+import { dataDir } from '../db.js';
+
+/**
+ * The last uploaded workbook is kept so that Force Re-sync has something to
+ * re-read, so it has to live wherever the database lives.
+ *
+ * ⚠️ It was `__dirname/../../data` — the source tree — which is the same folder
+ * in development and a *different* one on the deployed machine, where the
+ * database sits on a mounted volume and the application directory is rebuilt by
+ * every deploy. The effect was silent and delayed: uploading a spreadsheet
+ * worked, re-syncing worked, and then the first deploy after that turned Force
+ * Re-sync into "No spreadsheet has been uploaded yet" with the file gone.
+ * Deriving it from the database's directory is what keeps the two together.
+ */
+const CACHE_DIR = dataDir;
 
 /**
  * A ScheduleSource is anything that can hand back raw tabular data.

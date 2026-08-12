@@ -29,6 +29,19 @@ if (migrated.length) console.log(`[db] migrated: ${migrated.join(', ')}`);
 export const dbPath = DB_PATH;
 
 /**
+ * The directory holding the database — and therefore the one directory in the
+ * deploy that survives a restart.
+ *
+ * ⚠️ Anything else that has to persist belongs beside the database, derived
+ * from here, never from `__dirname`. In development the two are the same
+ * `data/` folder, which is exactly why getting this wrong is invisible until
+ * it is deployed: on the machine the app directory is rebuilt by every deploy,
+ * so a file written relative to the source tree is silently discarded on the
+ * next push. See docs/deploy.md.
+ */
+export const dataDir = path.dirname(DB_PATH);
+
+/**
  * `db.prepare` for SQL whose *shape* is fixed but whose text is built per call.
  *
  * The personalized schedule ORs over one clause per block target, so its SQL

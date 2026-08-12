@@ -1090,3 +1090,67 @@ fixed, and saying so is the point:
 Battery over a 14-hour day and whether `tel:` reaches a dialler are the same
 class — no amount of desktop verification substitutes, so they are named,
 assigned and dated rather than assumed.
+
+## Deploy target: Fly.io, one machine, one volume
+**Date:** 2026-08-11 · **Status:** decided
+
+**Question.** PLAN.md item 22. Where does this actually run, and what shape does
+the deploy take?
+
+**Decision.** Fly.io in `ord` (Chicago), a single machine with a single volume
+mounted at `/data`, never idling. Config in `fly.toml` and `Dockerfile`; the
+runbook is [deploy.md](deploy.md).
+
+**Why.** The stack decision above already ruled out serverless — live updates
+need held WebSockets. What remained was which of Railway / Fly / Render, and the
+deciding constraint is SQLite: the app needs a persistent disk *and* exactly one
+process writing to it. Fly gives both explicitly and cheaply, Render's
+persistent disk requires a paid instance and its free tier idles after 15
+minutes, which would drop every socket and cold-start whoever opened the app
+next.
+
+**What we gave up, and it is worth naming:** a single machine means a deploy is
+a few seconds of downtime, and there is no failover. That was accepted rather
+than worked around, because the alternative is not "two machines" — it is
+Postgres. A Fly volume attaches to one machine, so a second machine gets a
+second, empty database behind the same hostname, and which schedule a phone sees
+depends on which machine the proxy picked. Both machines pass their health
+checks, both edit logs are internally consistent, and an announcement reaches
+half the venue. There is no configuration that makes two machines safe here, so
+`--ha=false` and `min_machines_running = 1` are load-bearing, and a test asserts
+the second one.
+
+## Deploy config is checked at boot, in two severities
+**Date:** 2026-08-11 · **Status:** decided
+
+**Question.** Item 22 requires `ADMIN_PASSWORD` set and `SESSION_SECRET` pinned.
+How are they enforced, given that nothing goes wrong visibly when they aren't?
+
+**Decision.** `server/lib/deploy-config.js` checks the environment before the
+server serves anything, and refuses to boot in production on four settings: the
+default admin password, an unpinned or typed `SESSION_SECRET`, a database path
+inside the application directory, and a missing client build. Six more are
+warnings. `npm run preflight` runs the same checks and treats warnings as
+failures too.
+
+**Why.** Every one of these produces a server that *passes its own health
+check*. The default password serves a correct schedule and a write-access panel
+to anyone who read the README. A database inside the image serves a correct
+schedule right up until the next deploy silently empties it. A missing client
+build answers 200 with a plain-text page, so an uptime monitor stays green while
+every phone shows nothing. This is the same argument as `EVENT_TIMEZONE`
+refusing to fall back, and the same argument the whole project rests on: wrong
+is worse than absent, because absent gets noticed.
+
+**The two severities are the load-bearing part.** A restart at 2am on the
+Saturday must not be blocked by a missing hostname, so the boot gate is narrow
+and covers only what is unsafe or loses data; everything else warns and boots.
+The pre-event checklist gets the strict version through `preflight`, where
+stopping to fix something costs nothing. New checks go in at `warn` unless
+booting wrong is genuinely worse than not booting.
+
+`SESSION_SECRET` is required rather than left to the generated fallback for a
+reason that only appears at deploy: the fallback is stored *in the database*,
+which is the file item 23 copies off-box every few minutes. Pinning it in the
+environment keeps a live signing key out of every backup, and means rebuilding
+the volume doesn't sign all ~280 phones out.

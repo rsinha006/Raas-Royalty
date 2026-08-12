@@ -36,7 +36,7 @@ npm run codes -- --list
 ### Tests
 
 ```bash
-npm test        # 353 tests, no build and no server needed
+npm test        # 385 tests, no build and no server needed
 npm run ci      # what CI runs: the client typecheck and build, then the tests
 ```
 
@@ -87,6 +87,24 @@ mistaken for the live app.
 
 Express + Socket.IO + SQLite (better-sqlite3) serving a React/Vite bundle — one
 process, one file database, real WebSockets. No external services.
+
+## Deploying
+
+Fly.io, one machine on one volume, never idling. **[docs/deploy.md](docs/deploy.md)**
+is the runbook; `fly.toml` and `Dockerfile` are the config.
+
+```bash
+npm run preflight                        # the production config checks, here
+fly ssh console -C "npm run preflight"   # …and on the machine, which is the one that counts
+```
+
+⚠️ **One machine is a correctness requirement, not a cost decision.** A Fly
+volume attaches to a single machine, so a second machine is a second, empty
+database behind the same hostname — deploy with `--ha=false` and never
+`fly scale count 2`. In production the server refuses to start with the default
+admin password, an unpinned `SESSION_SECRET`, a database inside the deployed
+directory, or a missing client build; every one of those otherwise serves
+happily and passes its own health check.
 
 ## Data model
 

@@ -3,12 +3,13 @@ import http from 'node:http';
 import 'dotenv/config';
 import { Server as SocketServer } from 'socket.io';
 
-import { dbPath } from './db.js';
+import { db, dbPath } from './db.js';
 import { createApp } from './app.js';
 import { clearChangeFlags } from './lib/mutations.js';
 import { startPolling, syncStatus } from './sync/index.js';
 import { usingDefaultPassword } from './lib/auth.js';
 import { eventTimeState } from './lib/event-time.js';
+import { assertBootConfig } from './lib/deploy-config.js';
 import { createLiveHub, originPolicy, roomsForTargets } from './lib/live.js';
 
 const PORT = Number(process.env.PORT || 4000);
@@ -19,6 +20,24 @@ const PORT = Number(process.env.PORT || 4000);
  * It throws with the fix in the message; there is no fallback on purpose.
  */
 const eventTime = eventTimeState();
+
+/**
+ * Same shape of gate, for the rest of the deploy configuration: refuse to come
+ * up with the documented default admin password, or with the database sitting
+ * on a filesystem the next deploy replaces. Both produce a server that passes
+ * every health check it has. No-op outside production — see lib/deploy-config.js.
+ *
+ * Printed rather than thrown. This message is read off a `fly logs` tail by
+ * someone under time pressure, and a Node stack trace above it buries the one
+ * line that says what to set.
+ */
+let bootConfig;
+try {
+  bootConfig = assertBootConfig({ dbPath });
+} catch (err) {
+  console.error(`\n${err.message}\n`);
+  process.exit(1);
+}
 
 /**
  * Broadcasts are scoped to the rooms a change actually affects, and payloads
@@ -102,4 +121,50 @@ server.listen(PORT, () => {
   } else {
     console.log('  Admin password: set via ADMIN_PASSWORD\n');
   }
+  if (bootConfig.production) {
+    const warned = bootConfig.warnings?.length ?? 0;
+    console.log(`  Deploy checks: passing${warned ? ` with ${warned} warning${warned > 1 ? 's' : ''}` : ''}\n`);
+  }
 });
+
+/* --------------------------- shutdown --------------------------- */
+
+/**
+ * Close on SIGTERM, which is what the platform sends to replace this machine.
+ *
+ * ⚠️ Node installs no default handler for SIGTERM when it is PID 1, which it is
+ * inside the container — so without this the signal is *ignored*, every deploy
+ * waits out the platform's kill timeout, and the process is then SIGKILLed with
+ * the WAL unflushed. Closing the database explicitly checkpoints it, which is
+ * also what makes the item 23 snapshot of a just-stopped machine coherent.
+ *
+ * `io.close()` disconnects every socket and closes the HTTP server under it, so
+ * phones see a clean close and reconnect rather than hanging until their own
+ * timeout. Ten seconds is the ceiling; past that, something is wedged and being
+ * replaced quickly matters more than being replaced tidily.
+ */
+let shuttingDown = false;
+function shutdown(signal) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`\n  ${signal} — closing sockets and checkpointing the database`);
+
+  const forced = setTimeout(() => {
+    console.warn('  Shutdown timed out after 10s; exiting anyway.');
+    process.exit(1);
+  }, 10_000);
+  forced.unref?.();
+
+  io.close(() => {
+    try {
+      db.close();
+    } catch (err) {
+      console.error('  Database did not close cleanly:', err.message);
+    }
+    clearTimeout(forced);
+    process.exit(0);
+  });
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

@@ -14,8 +14,8 @@ competition weekend. **Read this at the start of every session.**
 ## Where things stand
 
 **Done: Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13,
-14, 19 and 20. Item 21 is half done** — the accessibility and responsive pass
-has landed; its hardware checks are open. Last updated 2026-08-11.
+14, 19, 20 and 22. Item 21 is half done** — the accessibility and responsive
+pass has landed; its hardware checks are open. Last updated 2026-08-11.
 
 - The viewer is **behind access codes**, enforced server-side, with the roster
   no longer enumerable. Codes are managed and exported from the admin panel.
@@ -40,12 +40,18 @@ has landed; its hardware checks are open. Last updated 2026-08-11.
   undo reverts all of it or refuses and writes nothing.
 - **"Fire alarm, evacuate" is one block**, targeting everyone, reaching every
   session and every socket.
-- **353 tests run in CI**, covering authorization negatives, timezone and DST,
+- **The deploy is configured and guarded, not yet run.** One Fly machine on one
+  volume, never idling, behind HTTPS; the server refuses to boot in production
+  with the default admin password, an unpinned signing key, or a database on a
+  filesystem the next deploy replaces — all three of which otherwise produce a
+  server that passes its own health check.
+- **385 tests run in CI**, covering authorization negatives, timezone and DST,
   code management, the schema migrations, broadcast scoping, the item 14
   correctness gaps, the bulk shift, the offline shell, preview fidelity,
   everything undo refuses, the announcement target, the measured colour
-  contrast, and the import pipeline — including last year's real spreadsheets,
-  which the importer has to refuse without moving the schedule.
+  contrast, the deploy gate, and the import pipeline — including last year's
+  real spreadsheets, which the importer has to refuse without moving the
+  schedule.
 - **The app is usable by someone who cannot see it.** Headings, landmarks and a
   real list where there were only `div`s; every colour measured against AA
   rather than eyeballed; one keyboard tab pattern instead of four broken ones;
@@ -57,11 +63,15 @@ has landed; its hardware checks are open. Last updated 2026-08-11.
 
 The open decisions are all resolved (see below); item 12 was reshaped by them.
 
-**Not yet true of this project:** no deployment and no real data.
+**Not yet true of this project:** nothing is deployed *yet* — item 22 built the
+config, the guardrails and the runbook, but the `fly deploy` itself needs an
+account and has not been run. And no real data.
 
-**Next up: Phase F (deploy and ops).** Item 21's remaining half needs phones in
-hands, not code — run [docs/device-matrix.md](docs/device-matrix.md) before the
-dress rehearsal.
+**Next up: item 23 (backups, monitoring, alerting).** It is the other half of
+Phase F and the deploy is not finished without it — right now the only copy of
+the event data would be the one on the volume. Then item 24. Item 21's
+remaining half needs phones in hands, not code — run
+[docs/device-matrix.md](docs/device-matrix.md) before the dress rehearsal.
 
 ### Build order
 
@@ -1133,10 +1143,70 @@ after the retro, not now.
 
 ## Phase F — Deployment and operations
 
-### 22. `[ ]` Deploy properly
+### 22. `[x]` Deploy properly
 
 Persistent disk (SQLite needs one), HTTPS, process supervisor, no idle sleeping.
 Set `ADMIN_PASSWORD` and pin `SESSION_SECRET`.
+
+**Done 2026-08-11** — `Dockerfile`, `fly.toml`, `server/lib/deploy-config.js`,
+`scripts/preflight.js`, graceful shutdown in `server/index.js`, and 32 new tests
+(`tests/deploy-config.test.js`, 385 total). Runbook in
+[docs/deploy.md](docs/deploy.md).
+
+```bash
+npm run preflight                          # check this environment
+fly ssh console -C "npm run preflight"      # check the one that matters
+```
+
+⚠️ **Nothing is deployed yet.** Everything here is the configuration and the
+guardrails; the `fly launch` / `fly deploy` sequence needs an account and is
+six commands in the runbook. The item is done in the sense that deploying is
+now a checklist rather than a design problem — see "still open" below.
+
+- ⚠️ **One machine, and that is correctness, not cost.** A Fly volume attaches
+  to a single machine, so a second machine is not more capacity — it is a
+  second, empty database behind the same hostname. Half the venue would get the
+  evacuation notice, both machines would pass their health checks, and both
+  edit logs would be internally consistent. `fly scale count 2` is the command
+  that breaks the event. There is no config that makes it safe; the fix would
+  be Postgres, which `docs/decisions.md` declined for good reasons.
+- **The boot gate refuses four things and warns about six.** Each of the four
+  produces a server that passes its own health check: the default admin
+  password, an unpinned `SESSION_SECRET`, a database inside the image, and a
+  missing client build — that last one answers 200 with the "API is running"
+  placeholder, so an uptime monitor stays green while every phone shows
+  nothing. ⚠️ The severity split is deliberate: a 2am restart must not be
+  blocked by a missing hostname, so `preflight` is the strict one and the boot
+  gate is narrow. Add new checks at `warn`.
+- ⚠️ **`SESSION_SECRET` is required because the fallback lives in the
+  database** — the file item 23 copies off-box every few minutes. Pinning it in
+  the environment keeps a live signing key out of every backup, and stops a
+  rebuilt volume from signing all ~280 phones out. `auth.js` now writes nothing
+  to the database when the env var is set.
+- **Found and fixed: the re-sync cache was written to the source tree.**
+  `sources.js` kept the last uploaded workbook at `__dirname/../../data`, which
+  in development is the same folder as the database and on the machine is not —
+  it is inside the directory every deploy replaces. Upload, re-sync, deploy,
+  and Force Re-sync becomes "No spreadsheet has been uploaded yet" with the
+  file gone. Persistent paths now derive from `dataDir` in `db.js`; there is a
+  test, and it is the sort of bug that has no local symptom at all.
+- **SIGTERM is handled**, which is what makes a deploy take seconds. Node
+  installs no default handler at PID 1, so without one the signal is *ignored*,
+  every deploy waits out the kill timeout, and the process is SIGKILLed with
+  the WAL unflushed. It now closes sockets cleanly and checkpoints the
+  database — which is also what makes an item 23 snapshot of a stopped machine
+  coherent.
+- **Keep-alive is set above the proxy's idle timeout** (65s against Fly's 60s)
+  so the proxy is always the side that closes. Item 20 found the reverse
+  showing "Offline · last known" on a phone with full signal. ⚠️ Verify against
+  the platform's current figure at deploy — it is a default, not a contract,
+  and the failure looks like bad wifi rather than like config.
+
+**Still open, and item 23 owns most of it:** no backups, no monitoring, no
+custom domain, and the deploy itself has not been run. Docker was not available
+in this session, so the image is unbuilt and untested — expect the first
+`fly deploy` to be where a Dockerfile problem surfaces, not a working tree
+problem.
 
 ### 23. `[ ]` Backups, monitoring, alerting
 
@@ -1197,7 +1267,9 @@ for "I lost my link" at the check-in desk.
 | Real roster still not in hand | A people problem, not an engineering one — it was due at T-6 and is the likeliest thing to slip past the rehearsal | 24 |
 | ~~Thundering herd on every change~~ | Closed — one team's edit wakes 66 of 600 phones, and even an announcement to all 600 settles in ~140ms with no errors | 11, 20 |
 | A wrong change made under pressure and no way back | Closed — one admin action is one log entry and undo reverts all of it, refusing rather than half-applying | 17 |
-| Total app failure during the event | Backups, monitoring, printed fallback | 23, 28 |
+| ~~A deploy comes up with the default admin password, or on a disk the next deploy wipes~~ | Closed — the server refuses to boot in production on either, plus two more that would otherwise pass a health check | 22 |
+| Scaling to a second machine silently forks the database | Half-closed — `--ha=false`, `min_machines_running = 1`, a test, and it is the first thing `docs/deploy.md` says. But nothing can *stop* `fly scale count 2`, so it stays a live risk during event week | 22 |
+| Total app failure during the event | Backups, monitoring, printed fallback — **none of it built yet** | 23, 28 |
 | Unreadable on a real phone in a dark venue | Half closed — every colour is measured against AA and pinned by tests, and the screen is navigable by heading and by keyboard. The notch, the radio and the battery still need hardware | 21 |
 
 ---
@@ -1214,7 +1286,7 @@ the two that actually catch problems.
 | ~~T-5~~ | ~~Phase B (access codes).~~ Done. |
 | T-4 | Phase C (reliability core) — items 9 ✅, 10 ✅, 11 ✅, 13 ✅ and 14 ✅ done; only item 12 remains, and it waits on the template. |
 | T-3 | Phase D + E (admin tooling, tests, load test) — Phase D ✅, item 19 ✅ and item 20 ✅ done early; item 21's audit ✅. |
-| T-2 | Phase F (deploy, ops) + item 21's device checks on real phones. |
+| T-2 | Phase F (deploy, ops) — item 22 ✅ configured, needs running; item 23 open. Plus item 21's device checks on real phones. |
 | T-1 | Items 24–26. Dress rehearsal. |
 | Event week | Items 27–28. Freeze Wednesday. |
 | After | Retro. Export the edit log to see what actually changed and how often. |

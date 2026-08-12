@@ -1,0 +1,89 @@
+# Royalty — Fly.io deployment. PLAN.md item 22, runbook in docs/deploy.md.
+#
+# ⚠️ THIS APP RUNS ON EXACTLY ONE MACHINE. A Fly volume is attached to a single
+# machine, not shared between them, so a second machine does not scale this app
+# — it forks it. Two machines means two SQLite files behind one hostname, and
+# whose schedule you get depends on which one the proxy picked. Half the phones
+# would show an evacuation notice and half would not, with nothing in either
+# database looking wrong. Always deploy with `--ha=false`, and check
+# `fly status` shows one machine after any scaling command.
+
+app = "royalty-schedule"
+primary_region = "ord" # Chicago — nearest region to Bloomington, IN.
+
+[build]
+
+[env]
+  NODE_ENV = "production"
+  PORT = "8080"
+
+  # The venue's zone, as an IANA name. The server refuses to start on an
+  # abbreviation or a fixed offset; see server/lib/event-time.js.
+  EVENT_TIMEZONE = "America/Indiana/Indianapolis"
+
+  # On the volume mounted below — NOT in the image, which every deploy replaces.
+  DB_PATH = "/data/royalty.db"
+
+  # Fly's proxy is exactly one hop, and it sets X-Forwarded-For.
+  TRUST_PROXY = "1"
+
+  # Above the proxy's 60s idle timeout so the proxy is always the side that
+  # closes a connection. If ours closed first, a phone reusing the socket in
+  # that instant would get ECONNRESET and render "Offline · last known" on full
+  # signal — item 20 measured about one per thousand refetches at Node's 5s
+  # default. Verify against the proxy timeout at deploy; see docs/deploy.md.
+  KEEP_ALIVE_TIMEOUT_MS = "65000"
+
+  # PUBLIC_BASE_URL is set with `fly secrets set` once the hostname is final,
+  # rather than here — the access links in the CSV export are built from it, and
+  # 280 links to the wrong hostname is a mistake the recipients discover.
+
+# ADMIN_PASSWORD and SESSION_SECRET are secrets, never this file:
+#   fly secrets set ADMIN_PASSWORD="$(openssl rand -base64 18)"
+#   fly secrets set SESSION_SECRET="$(openssl rand -hex 32)"
+# The server refuses to boot in production without both. See lib/deploy-config.js.
+
+[[mounts]]
+  source = "royalty_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+
+  # Never idle. Scale-to-zero would drop every held socket and add a cold start
+  # to whoever opened the app next — during an event the app is either up or it
+  # is useless. auto_start is the safety net for a machine that stopped anyway.
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  # Generous, because these limits exist to spread load across machines and
+  # there is only one. The real ceiling is CPU, not connections: better-sqlite3
+  # is synchronous, so 600 phones refetching are served one at a time at ~105µs
+  # each. What must not happen is the proxy queueing or 503ing below that.
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 1000
+    hard_limit = 2000
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "15s"
+    method = "GET"
+    path = "/api/health"
+    timeout = "3s"
+
+# One machine holding one volume cannot be replaced by a rolling deploy — there
+# is nothing to roll to. `immediate` stops it and starts the new one, which is
+# a few seconds of downtime per deploy and the reason item 27 freezes the week
+# before. Phones reconnect on their own; the shell is already cached.
+[deploy]
+  strategy = "immediate"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb" # Peak RSS was 210MB at 600 connections (docs/load-test.md).
+  cpu_kind = "shared"
+  cpus = 1

@@ -1,6 +1,5 @@
 import path from 'node:path';
 import fs from 'node:fs';
-import { fileURLToPath } from 'node:url';
 
 import express from 'express';
 import cookieParser from 'cookie-parser';
@@ -8,9 +7,8 @@ import cookieParser from 'cookie-parser';
 import { publicRouter } from './routes/public.js';
 import { adminRouter } from './routes/admin.js';
 import { magicLinkRouter } from './routes/magic-link.js';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CLIENT_DIST = path.join(__dirname, '..', 'client', 'dist');
+import { recordError } from './lib/ops.js';
+import { CLIENT_DIST } from './lib/deploy-config.js';
 
 /**
  * Express app, separated from the HTTP server and Socket.IO so the
@@ -18,6 +16,38 @@ const CLIENT_DIST = path.join(__dirname, '..', 'client', 'dist');
  * order, same cookie parsing, same routers — instead of a stand-in that could
  * pass while production fails.
  */
+/**
+ * The last stop for anything that throws.
+ *
+ * Exported so the tests can exercise the real one rather than a copy of it —
+ * this is the code path that decides whether an error during the event is
+ * written down anywhere, and a stand-in could pass while production loses it.
+ *
+ * ⚠️ Only *server* faults are recorded. A malformed request body raises an
+ * error with a 4xx status on it, and recording those would fill the panel's
+ * error list — the one place someone looks when something is wrong — with
+ * things that are not wrong with the server.
+ */
+export function errorHandler(err, req, res, next) {
+  if (err?.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({ error: 'That file is too large (8 MB limit).' });
+  }
+
+  const status = Number(err?.status || err?.statusCode || 500);
+  if (status >= 400 && status < 500) {
+    return res.status(status).json({ error: err.message || 'Bad request' });
+  }
+
+  /**
+   * Every 500 the app produces lands in the ring buffer and the error file
+   * beside the database, because `fly logs` only shows what happened while
+   * someone had a terminal open — and during the event nobody does. See
+   * lib/ops.js.
+   */
+  recordError('http', err, { method: req.method, path: req.path });
+  res.status(500).json({ error: err.message || 'Unexpected server error' });
+}
+
 export function createApp({ broadcast = () => {}, serveClient = true } = {}) {
   const app = express();
 
@@ -39,18 +69,14 @@ export function createApp({ broadcast = () => {}, serveClient = true } = {}) {
   app.use(express.json({ limit: '2mb' }));
   app.use(cookieParser());
 
-  app.use('/api', publicRouter());
+  // `serveClient` reaches the health check: an app that was never going to
+  // serve the bundle must not report itself unhealthy for not having one.
+  app.use('/api', publicRouter({ serveClient }));
   app.use('/api/admin', adminRouter({ broadcast }));
   // Before the SPA fallback: /s/:code must sign in and redirect, not render.
   app.use('/s', magicLinkRouter());
 
-  app.use((err, req, res, next) => {
-    if (err?.code === 'LIMIT_FILE_SIZE') {
-      return res.status(413).json({ error: 'That file is too large (8 MB limit).' });
-    }
-    console.error('[error]', err);
-    res.status(500).json({ error: err.message || 'Unexpected server error' });
-  });
+  app.use(errorHandler);
 
   if (!serveClient) return app;
 

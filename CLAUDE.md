@@ -21,14 +21,17 @@ otherwise the reasoning is lost between sessions and gets re-litigated.
 npm install && npm run seed && npm run build && npm start   # http://localhost:4000
 npm run dev          # hot reload: client :5173, API :4000
 npm run seed:reset   # rebuild placeholder data from scratch
-npm test             # 385 tests
+npm test             # 441 tests
 npm run ci           # what CI runs: the client typecheck and build, then the tests
 npm run codes -- --list   # every live access code and its subject
 npm run load-test         # 600 virtual phones against an isolated fixture DB
 npm run preflight         # the production config checks, against this environment
+npm run backup            # a verified snapshot now; --list shows what is kept
+npm run restore           # what is available to restore; --yes replaces the database
 ```
 
 Deploying is Fly.io, one machine, one volume — [docs/deploy.md](docs/deploy.md).
+Backups, monitoring and alerting during the event — [docs/ops.md](docs/ops.md).
 
 Admin at `/admin` (password `royalty-admin` by default — set
 `ADMIN_PASSWORD`). The viewer needs an access code: open `/s/:code` from the
@@ -49,13 +52,15 @@ React/Vite bundle from `client/dist`. No external services.
 - `server/lib/live.js` — socket rooms, scoped broadcasts, the origin policy
 - `server/lib/event-time.js` — the venue timezone; wall-clock → instant
 - `server/db.js` — `target_versions`: per-subject "last updated"
+- `server/lib/backup.js` — verified snapshots, retention, the off-box copy
+- `server/lib/ops.js` — error capture, alerts, the heartbeat, `/api/health`
 - `server/sync/` — the import pipeline
 - `client/sw.js` — the offline shell, emitted by `client/vite-plugin-sw.js`
 - `client/src/tabstrip.ts` — the one ARIA tabs implementation, used by all four
 - `client/src/viewer/` — the participant app
 - `client/src/admin/` — the logistics panel
 
-Twelve things worth knowing before changing anything:
+Thirteen things worth knowing before changing anything:
 
 **Block targets are four-way, and the fourth is not like the others.** A block
 targets a team, a person, a role, or `everyone` — the announcement audience,
@@ -161,12 +166,27 @@ passing its own health check; `npm run preflight` runs the same checks strictly.
 New checks go in at `warn`, because a 2am restart must not be blocked by a
 missing hostname. Runbook: [docs/deploy.md](docs/deploy.md).
 
+**A backup is only a backup once something has opened it.** Every snapshot is
+re-opened, `integrity_check`ed and counted against the live database before it
+is kept, and one that fails is deleted rather than left in the directory —
+⚠️ an empty SQLite file is *structurally valid*, so it passes every check there
+is and restores to an event with nobody in it. Two more traps, both of which
+were real: a snapshot must be sealed (`-wal`/`-shm` removed) before the rename,
+or the orphans are invisible to the listing and therefore never pruned; and
+staleness is measured from the last verified *run*, never from the newest file's
+mtime, because a run that finds the database unchanged writes no file and would
+otherwise report an idle, perfectly backed-up event as stale. ⚠️ The alarm that
+matters lives outside the machine: `HEARTBEAT_URL` is a dead-man's switch,
+because nothing running in this process can report that this process stopped.
+`/api/health` fails only when phones are not being served — keep it that narrow,
+and keep it at one indexed row. Runbook: [docs/ops.md](docs/ops.md).
+
 Data model and spreadsheet templates are documented in [README.md](README.md).
 
 ## Current state
 
 Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13, 14, 19,
-20 and 22 are done; item 21's accessibility half is done and its hardware half
+20, 22 and 23 are done; item 21's accessibility half is done and its hardware half
 is a checklist in [docs/device-matrix.md](docs/device-matrix.md) — see
 [PLAN.md](PLAN.md) for what each one settled. In short: the viewer is behind
 access codes enforced server-side, event times are resolved against the venue's
@@ -179,13 +199,16 @@ evacuate" is one block rather than six, an upload of the wrong spreadsheet is
 refused rather than half-applied, 600 concurrent phones have been measured
 rather than assumed, the screen is navigable by heading, by keyboard and by
 screen reader with every colour measured against AA, a production deploy cannot
-come up with the default password or on a disk the next push wipes, and 385
-tests run in CI.
+come up with the default password or on a disk the next push wipes, the event
+data is copied off the machine every few minutes and verified on the way out,
+and 441 tests run in CI.
 
 Still not true: **nothing is actually deployed** — item 22 built the config, the
 guardrails and the runbook, but `fly deploy` needs an account and has not been
-run, and the image has never been built. No backups or monitoring either
-(item 23). And no real data.
+run, and the image has never been built. Item 23's snapshots, health check and
+alerting are built and exercised locally, but the backup target, the heartbeat
+and the alert webhook have nothing real to point at until there is a deploy.
+And no real data.
 
 The design decisions that were blocking are settled in
 [docs/decisions.md](docs/decisions.md) — read it before changing the data model,

@@ -44,6 +44,7 @@ import {
 import { applyRosterDiff, computeRosterDiff } from '../sync/diff.js';
 import { uploadSource } from '../sync/sources.js';
 import { adminCodesRouter } from './admin-codes.js';
+import { adminOpsRouter } from './admin-ops.js';
 import { previewFor } from '../lib/view-as.js';
 import { applyUndo, listBatches, planUndo } from '../lib/undo.js';
 import { listCodes, missingSubjects } from '../lib/access-codes.js';
@@ -154,6 +155,12 @@ export function adminRouter({ broadcast }) {
    * ---------------------------------------------------------------- */
 
   router.use('/codes', adminCodesRouter());
+
+  /* ---------------------------------------------------------------- *
+   * Ops — snapshots, errors, the alert path (item 23)
+   * ---------------------------------------------------------------- */
+
+  router.use('/ops', adminOpsRouter());
 
   /* ---------------------------------------------------------------- *
    * Overview

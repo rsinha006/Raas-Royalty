@@ -36,7 +36,7 @@ npm run codes -- --list
 ### Tests
 
 ```bash
-npm test        # 385 tests, no build and no server needed
+npm test        # 441 tests, no build and no server needed
 npm run ci      # what CI runs: the client typecheck and build, then the tests
 ```
 
@@ -105,6 +105,26 @@ database behind the same hostname — deploy with `--ha=false` and never
 admin password, an unpinned `SESSION_SECRET`, a database inside the deployed
 directory, or a missing client build; every one of those otherwise serves
 happily and passes its own health check.
+
+## Backups and monitoring
+
+**[docs/ops.md](docs/ops.md)** is the runbook for the event itself — what to do
+when something is wrong, and how to restore. The short version:
+
+```bash
+npm run backup                 # a verified snapshot now, shipped off-box if configured
+npm run backup -- --list       # what is kept
+npm run restore                # what is available; add --yes to replace the database
+```
+
+The server takes a snapshot every 5 minutes in production, re-opens each one and
+checks it before keeping it, prunes by count and by total bytes, and copies it
+off the machine via `BACKUP_TARGET_URL` or `BACKUP_TARGET_CMD`. `/api/health`
+answers 503 when phones are not being served rather than 200 for any live
+process, server faults are recorded beside the database and surfaced in the
+panel's **Ops** tab, and `HEARTBEAT_URL` pings an external dead-man's switch —
+⚠️ the only alarm that survives this machine stopping, because nothing running
+on it can report that it stopped.
 
 ## Data model
 

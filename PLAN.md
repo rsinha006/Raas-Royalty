@@ -14,7 +14,7 @@ competition weekend. **Read this at the start of every session.**
 ## Where things stand
 
 **Done: Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13,
-14, 19, 20 and 22. Item 21 is half done** — the accessibility and responsive
+14, 19, 20, 22 and 23. Item 21 is half done** — the accessibility and responsive
 pass has landed; its hardware checks are open. Last updated 2026-08-11.
 
 - The viewer is **behind access codes**, enforced server-side, with the roster
@@ -45,13 +45,18 @@ pass has landed; its hardware checks are open. Last updated 2026-08-11.
   with the default admin password, an unpinned signing key, or a database on a
   filesystem the next deploy replaces — all three of which otherwise produce a
   server that passes its own health check.
-- **385 tests run in CI**, covering authorization negatives, timezone and DST,
+- **The event data is copied off the machine every few minutes, verified**, and
+  putting one back is a script rather than an improvisation; `/api/health` now
+  fails when phones are not being served rather than whenever the process is
+  alive; and the alarm that pages someone lives outside the machine, because
+  nothing inside it can report that it stopped.
+- **441 tests run in CI**, covering authorization negatives, timezone and DST,
   code management, the schema migrations, broadcast scoping, the item 14
   correctness gaps, the bulk shift, the offline shell, preview fidelity,
   everything undo refuses, the announcement target, the measured colour
-  contrast, the deploy gate, and the import pipeline — including last year's
-  real spreadsheets, which the importer has to refuse without moving the
-  schedule.
+  contrast, the deploy gate, snapshot verification and restore, and the import
+  pipeline — including last year's real spreadsheets, which the importer has to
+  refuse without moving the schedule.
 - **The app is usable by someone who cannot see it.** Headings, landmarks and a
   real list where there were only `div`s; every colour measured against AA
   rather than eyeballed; one keyboard tab pattern instead of four broken ones;
@@ -65,11 +70,12 @@ The open decisions are all resolved (see below); item 12 was reshaped by them.
 
 **Not yet true of this project:** nothing is deployed *yet* — item 22 built the
 config, the guardrails and the runbook, but the `fly deploy` itself needs an
-account and has not been run. And no real data.
+account and has not been run, so item 23's backup target, heartbeat and alert
+webhook are configured-for rather than pointed at anything. And no real data.
 
-**Next up: item 23 (backups, monitoring, alerting).** It is the other half of
-Phase F and the deploy is not finished without it — right now the only copy of
-the event data would be the one on the volume. Then item 24. Item 21's
+**Next up: item 24 (the real roster and schedule).** Phase F is now built —
+what is left in it is running `fly deploy` with an account, and pointing the
+three item 23 secrets at real services ([docs/ops.md](docs/ops.md)). Item 21's
 remaining half needs phones in hands, not code — run
 [docs/device-matrix.md](docs/device-matrix.md) before the dress rehearsal.
 
@@ -1202,17 +1208,88 @@ now a checklist rather than a design problem — see "still open" below.
   the platform's current figure at deploy — it is a default, not a contract,
   and the failure looks like bad wifi rather than like config.
 
-**Still open, and item 23 owns most of it:** no backups, no monitoring, no
-custom domain, and the deploy itself has not been run. Docker was not available
+**Still open:** no custom domain, and the deploy itself has not been run.
+Backups, monitoring and alerting landed in item 23 the same day. Docker was not available
 in this session, so the image is unbuilt and untested — expect the first
 `fly deploy` to be where a Dockerfile problem surfaces, not a working tree
 problem.
 
-### 23. `[ ]` Backups, monitoring, alerting
+### 23. `[x]` Backups, monitoring, alerting
 
 Automated off-box DB snapshots every few minutes during the event. Uptime
 monitor on `/api/health` with SMS to whoever is on call. Error tracking — you
 will not be reading server logs during a competition.
+
+**Done 2026-08-11** — `server/lib/backup.js`, `server/lib/ops.js`,
+`server/routes/admin-ops.js`, an Ops tab, `scripts/backup.js`,
+`scripts/restore.js`, and 56 new tests (`tests/backup.test.js`,
+`tests/ops.test.js`, plus five in `deploy-config.test.js`, 441 total). Runbook
+in [docs/ops.md](docs/ops.md).
+
+```bash
+npm run backup                 # a verified snapshot now, shipped off-box
+npm run restore                # what is available; --yes replaces the database
+```
+
+Verified against a running server with snapshots on a 15-second interval: 
+copies appearing and landing at an off-box target, the heartbeat acknowledged 
+every 15s, a test alert arriving at a webhook receiver from the panel's button, 
+and a snapshot restored over a wounded database (43 blocks → 110) with the old 
+file set aside.
+
+- ⚠️ **A backup nobody has opened is a guess**, and the failure mode is not a
+  crash: an empty SQLite file is *structurally valid*, passes `integrity_check`,
+  and restores to an event with nobody in it. So every snapshot is re-opened and
+  its row counts compared against the live database before it is kept, and one
+  that fails is **deleted rather than kept** — a file in that directory reads as
+  a backup to everything downstream, so a bad one is worse than none because it
+  makes the count go up. There is a test that builds exactly that empty-but-valid
+  file.
+- ⚠️ **The SMS is the heartbeat, and it has to be.** Nothing running inside this
+  process can report that this process has stopped — a wedged event loop, a full
+  disk or a killed machine takes every check that lives in here with it. So
+  `HEARTBEAT_URL` pings an external dead-man's switch and *that* service pages
+  someone when the pings stop. The in-process webhook covers the smaller class of
+  problem the server is still healthy enough to describe, and a failed alert
+  delivery is recorded and never re-alerted: announcing a broken alert channel
+  through the alert channel is a loop.
+- **`/api/health` now answers 503 when phones are not being served**, which
+  closes the gap item 22 found: a deploy with no client bundle answers 200 with
+  the "API is running" placeholder, so the monitor and the platform health check
+  both stayed green while the venue saw nothing. It stays narrow on purpose —
+  stale backups are reported there and never fail it, because a monitor that
+  pages for a degraded-but-working condition gets ignored, and takes the real
+  page with it. Still one indexed row on the happy path; item 20 uses it as a
+  latency probe.
+- **Two off-box mechanisms, not one integration.** `BACKUP_TARGET_URL` (HTTP)
+  and `BACKUP_TARGET_CMD` (`aws s3 cp {file} …`, rclone, scp). Where the backups
+  go depends on what the event has an account for, and that should not be
+  re-litigated at T-2 days. A shipping failure never fails the run: the local
+  copy is already verified.
+- **Retention is bounded by bytes as well as count**, because the volume also
+  holds the database and filling it takes the event down in the most confusing
+  way available — writes start failing while every health check still passes.
+  Locally that is a few hours of history; the off-box target is what holds the
+  whole event, since nothing here prunes it.
+- **Two bugs the browser found that review had not.** Verifying a copy leaves
+  `-shm`/`-wal` files named after the *temporary* file, so after the rename they
+  were orphans that no longer matched the snapshot pattern — invisible to the
+  listing and therefore never pruned. And staleness was measured from the newest
+  file's mtime, so a run that found the database unchanged and discarded the
+  duplicate made a perfectly backed-up idle event report "no verified snapshot
+  recently" — a page at 3am about nothing. Both now have tests.
+- **The restore script is the deliverable, not the snapshots.** It verifies
+  before touching anything, sets the current database aside rather than
+  overwriting it, and moves the WAL and SHM out of the way — a stale `-wal` next
+  to a restored file is how a restore appears to work and then serves a mixture
+  of both. ⚠️ It cannot detect a running server, so stopping first is stated in
+  the runbook rather than enforced.
+
+**Still open:** the restore drill itself belongs to item 26 — the round trip is
+tested, the full stop-restore-start sequence on a real machine is not. Nothing
+checks that shipped copies are readable at the far end (the panel reports the
+request was accepted). And no metrics on the machine; `fly status` and item 20's
+measurements are the substitute.
 
 ---
 
@@ -1269,7 +1346,7 @@ for "I lost my link" at the check-in desk.
 | A wrong change made under pressure and no way back | Closed — one admin action is one log entry and undo reverts all of it, refusing rather than half-applying | 17 |
 | ~~A deploy comes up with the default admin password, or on a disk the next deploy wipes~~ | Closed — the server refuses to boot in production on either, plus two more that would otherwise pass a health check | 22 |
 | Scaling to a second machine silently forks the database | Half-closed — `--ha=false`, `min_machines_running = 1`, a test, and it is the first thing `docs/deploy.md` says. But nothing can *stop* `fly scale count 2`, so it stays a live risk during event week | 22 |
-| Total app failure during the event | Backups, monitoring, printed fallback — **none of it built yet** | 23, 28 |
+| Total app failure during the event | Half closed — verified snapshots every 5 minutes with an off-box copy, a tested restore script, health that fails when phones are not being served, and an external dead-man's switch that pages someone. The targets are unset until the deploy exists, the restore drill is item 26, and the printed fallback is still item 28 | 23, 26, 28 |
 | Unreadable on a real phone in a dark venue | Half closed — every colour is measured against AA and pinned by tests, and the screen is navigable by heading and by keyboard. The notch, the radio and the battery still need hardware | 21 |
 
 ---
@@ -1286,7 +1363,7 @@ the two that actually catch problems.
 | ~~T-5~~ | ~~Phase B (access codes).~~ Done. |
 | T-4 | Phase C (reliability core) — items 9 ✅, 10 ✅, 11 ✅, 13 ✅ and 14 ✅ done; only item 12 remains, and it waits on the template. |
 | T-3 | Phase D + E (admin tooling, tests, load test) — Phase D ✅, item 19 ✅ and item 20 ✅ done early; item 21's audit ✅. |
-| T-2 | Phase F (deploy, ops) — item 22 ✅ configured, needs running; item 23 open. Plus item 21's device checks on real phones. |
+| T-2 | Phase F (deploy, ops) — item 22 ✅ configured and item 23 ✅ built; both need the deploy actually run, and item 23's three secrets pointed at real services. Plus item 21's device checks on real phones. |
 | T-1 | Items 24–26. Dress rehearsal. |
 | Event week | Items 27–28. Freeze Wednesday. |
 | After | Retro. Export the edit log to see what actually changed and how often. |

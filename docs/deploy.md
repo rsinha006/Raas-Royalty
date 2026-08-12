@@ -113,7 +113,7 @@ The first four are one command each; the rest need a browser.
 ```bash
 fly status                                        # one machine, state "started"
 fly ssh console -C "npm run preflight"            # every check passing
-curl -si https://<host>/api/health                # {"ok":true,...}
+curl -si https://<host>/api/health                # 200 {"ok":true,...}; 503 = up, not serving
 curl -si http://<host>/ | head -1                 # 301 to https
 ```
 
@@ -209,18 +209,28 @@ is a restore from the item 23 snapshot.
 fly logs                                   # live
 fly ssh console                            # a shell on the machine
 fly ssh console -C "npm run codes -- --list"
-fly ssh sftp get /data/royalty.db ./royalty-backup.db    # ad-hoc snapshot
+fly ssh console -C "npm run backup"        # a verified snapshot, shipped off-box
+fly ssh console -C "npm run restore"       # what is available to restore (docs/ops.md)
 ```
 
 ---
 
 ## Still open
 
-**Item 23 owns backups, monitoring and alerting**, and none of it is done here.
-Until it is, the only copy of the event data is the one on the volume — Fly
-snapshots volumes daily by default, which is not nearly often enough for a
-two-day event where the whole point is that the schedule changes every few
-minutes. The `fly ssh sftp get` line above is the manual stopgap.
+**Backups, monitoring and alerting are item 23 and are now built** — see
+[ops.md](ops.md), which is the runbook to read during the event. Three secrets
+belong in the first-deploy sequence above, between steps 4 and 5:
+
+```bash
+fly secrets set BACKUP_TARGET_URL="…"        # or BACKUP_TARGET_CMD
+fly secrets set HEARTBEAT_URL="…"            # the dead-man's switch that pages someone
+fly secrets set ALERT_WEBHOOK_URL="…"        # Slack or Discord, for in-process errors
+```
+
+Without them the app still runs and still snapshots — onto the same volume as
+the database, which covers a bad import and not the loss of the machine. Fly's
+own daily volume snapshots are the other backstop, and a day is far too coarse
+for an event whose whole point is that the schedule changes every few minutes.
 
 **No custom domain is configured.** The app answers on `*.fly.dev`. If a real
 hostname is wanted, add it before item 25 distributes the links, not after —

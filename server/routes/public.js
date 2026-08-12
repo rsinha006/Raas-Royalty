@@ -4,7 +4,8 @@ import {
   getPersonalizedSchedule,
   listTeamMembers,
 } from '../lib/queries.js';
-import { scheduleUpdatedAt, db } from '../db.js';
+import { db } from '../db.js';
+import { healthReport } from '../lib/ops.js';
 import { eventTimeState, instantFromWallClockString } from '../lib/event-time.js';
 import {
   requireViewer,
@@ -47,12 +48,26 @@ export function subjectResolves(record) {
  * `requireViewer`, and no endpoint accepts a subject id from the caller — the
  * subject comes from the session, which comes from a code.
  */
-export function publicRouter() {
+export function publicRouter({ serveClient = true } = {}) {
   const router = express.Router();
 
-  /** Liveness only. No event data, so monitoring doesn't need a code. */
+  /**
+   * What the uptime monitor watches. No event data, so monitoring needs no code
+   * — and no session either, which is what lets an outside service check it.
+   *
+   * ⚠️ A non-200 here means *phones are not being served*, and it stays that
+   * narrow on purpose: this is the endpoint that pages someone. Item 22 found
+   * that a deploy with no client bundle answers 200 with a plain-text
+   * placeholder, so "up" was not the same question as "working" — that gap is
+   * what `healthReport` closes. Backup staleness is reported here but never
+   * fails it; see lib/ops.js.
+   *
+   * Still one indexed row on the happy path, because the item 20 load test uses
+   * this as its latency probe and Fly checks it every 15 seconds.
+   */
   router.get('/health', (req, res) => {
-    res.json({ ok: true, updatedAt: scheduleUpdatedAt() });
+    const report = healthReport({ serveClient });
+    res.status(report.ok ? 200 : 503).json(report);
   });
 
   /** Event name and nothing else. See getBootstrap. */

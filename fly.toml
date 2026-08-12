@@ -34,7 +34,12 @@ primary_region = "ord" # Chicago — nearest region to Bloomington, IN.
   # default. Verify against the proxy timeout at deploy; see docs/deploy.md.
   KEEP_ALIVE_TIMEOUT_MS = "65000"
 
-  # PUBLIC_BASE_URL is set with `fly secrets set` once the hostname is final,
+    # Item 23. Snapshots default to every 5 minutes in production; the settings
+  # that decide *where a copy goes* are secrets, below, because a copy beside
+  # the database dies with the volume it sits on. See docs/ops.md.
+  # BACKUP_INTERVAL_MS = "300000"
+
+# PUBLIC_BASE_URL is set with `fly secrets set` once the hostname is final,
   # rather than here — the access links in the CSV export are built from it, and
   # 280 links to the wrong hostname is a mistake the recipients discover.
 
@@ -42,6 +47,11 @@ primary_region = "ord" # Chicago — nearest region to Bloomington, IN.
 #   fly secrets set ADMIN_PASSWORD="$(openssl rand -base64 18)"
 #   fly secrets set SESSION_SECRET="$(openssl rand -hex 32)"
 # The server refuses to boot in production without both. See lib/deploy-config.js.
+#
+# Item 23's three, which `npm run preflight` warns about until they are set:
+#   fly secrets set BACKUP_TARGET_URL="…"      # or BACKUP_TARGET_CMD
+#   fly secrets set HEARTBEAT_URL="…"          # the dead-man's switch that pages someone
+#   fly secrets set ALERT_WEBHOOK_URL="…"      # Slack/Discord, for in-process errors
 
 [[mounts]]
   source = "royalty_data"
@@ -68,6 +78,11 @@ primary_region = "ord" # Chicago — nearest region to Bloomington, IN.
     soft_limit = 1000
     hard_limit = 2000
 
+  # ⚠️ /api/health answers 503 when the process is up but phones are *not* being
+  # served — an unreadable database, or a missing client bundle, which used to
+  # answer 200 with a plain-text placeholder while every phone showed nothing.
+  # So a failing check here means the machine is genuinely not usable, and
+  # letting Fly replace it is the right response.
   [[http_service.checks]]
     grace_period = "10s"
     interval = "15s"

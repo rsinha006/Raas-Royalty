@@ -11,6 +11,8 @@ import { usingDefaultPassword } from './lib/auth.js';
 import { eventTimeState } from './lib/event-time.js';
 import { assertBootConfig } from './lib/deploy-config.js';
 import { createLiveHub, originPolicy, roomsForTargets } from './lib/live.js';
+import { backupStatus, hasOffBoxTarget, startBackups, staleAfterMs } from './lib/backup.js';
+import { installProcessHandlers, notify, recordError, startHeartbeat } from './lib/ops.js';
 
 const PORT = Number(process.env.PORT || 4000);
 
@@ -95,6 +97,56 @@ hub = createLiveHub(io);
 // Changed-block highlights are short-lived; expire the stored flags.
 setInterval(() => clearChangeFlags(30), 5 * 60_000).unref?.();
 
+/**
+ * Item 23 — snapshots, error tracking, and the outside observer.
+ *
+ * Order matters slightly: the process handlers go on first, so a failure in
+ * anything below is recorded rather than printed to a log nobody is reading.
+ */
+installProcessHandlers();
+const heartbeat = startHeartbeat();
+
+/**
+ * Two conditions are worth an alert, and neither is "a snapshot failed once".
+ *
+ *   - Three in a row: the local disk or the target is genuinely broken, not
+ *     having a moment.
+ *   - Nothing kept for three intervals: the more dangerous shape, because it is
+ *     what a silently stopped snapshotter looks like. The run that would report
+ *     the problem is the run that is not happening, so the check has to be a
+ *     separate timer that asks the directory rather than the scheduler.
+ */
+const backups = startBackups({
+  onEvent(record) {
+    if (record.ok) return;
+    recordError('backup', new Error(record.error), { consecutiveFailures: record.consecutiveFailures });
+    if (record.consecutiveFailures >= 3) {
+      notify({
+        level: 'error',
+        key: 'backup-failing',
+        title: `Database snapshots have failed ${record.consecutiveFailures} times in a row`,
+        detail: `${record.error}\nSnapshots: ${backupStatus().dir}`,
+      });
+    }
+  },
+});
+
+if (backups.started) {
+  setInterval(() => {
+    const status = backupStatus();
+    if (!status.stale) return;
+    notify({
+      level: 'error',
+      key: 'backup-stale',
+      title: 'No verified database snapshot recently',
+      detail:
+        `Newest snapshot is ${status.ageSeconds === null ? 'missing entirely' : `${status.ageSeconds}s old`}; ` +
+        `expected one every ${Math.round(status.intervalMs / 1000)}s.` +
+        (status.lastError ? `\nLast error: ${status.lastError}` : ''),
+    });
+  }, staleAfterMs(backups.config)).unref?.();
+}
+
 startPolling((result) => {
   broadcast(
     'schedule:updated',
@@ -116,6 +168,15 @@ server.listen(PORT, () => {
   );
   console.log(`  Schedule source: ${status.activeLabel}${status.canPull ? ' (re-sync available)' : ''}`);
   console.log(`  Socket origins: ${origins.describe()}`);
+  console.log(
+    `  Snapshots: ${
+      backups.started
+        ? `every ${Math.round(backups.config.intervalMs / 1000)}s → ${backups.config.dir}` +
+          `${hasOffBoxTarget(backups.config) ? ' (+ off-box)' : ' (on this volume only)'}`
+        : 'off (set BACKUP_INTERVAL_MS)'
+    }`
+  );
+  console.log(`  Heartbeat: ${heartbeat.started ? 'pinging HEARTBEAT_URL' : 'off (set HEARTBEAT_URL)'}`);
   if (usingDefaultPassword()) {
     console.log('  Admin password: royalty-admin  ← set ADMIN_PASSWORD before the event\n');
   } else {

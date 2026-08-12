@@ -1154,3 +1154,71 @@ reason that only appears at deploy: the fallback is stored *in the database*,
 which is the file item 23 copies off-box every few minutes. Pinning it in the
 environment keeps a live signing key out of every backup, and means rebuilding
 the volume doesn't sign all ~280 phones out.
+
+## Backups are verified copies on a timer, and the alarm lives outside the box
+**Date:** 2026-08-11 · **Status:** decided
+
+**Question.** Item 23 asks for off-box snapshots every few minutes, an uptime
+monitor on `/api/health` with SMS, and error tracking. What actually runs, given
+one machine, one volume, and nobody reading logs during a competition?
+
+**Decision.** Three separate mechanisms, deliberately not one:
+
+1. **Snapshots** — `server/lib/backup.js`, on an in-process timer (5 minutes in
+   production). Each one is taken with SQLite's online backup API, re-opened,
+   `integrity_check`ed, counted against the live database, and only then kept.
+   It is then shipped off-box via `BACKUP_TARGET_URL` (HTTP) or
+   `BACKUP_TARGET_CMD` (any command). Local copies are pruned by count *and* by
+   total bytes.
+2. **Health** — `/api/health` now answers 503 when phones are not being served,
+   and reports backup staleness without failing on it.
+3. **Alerts** — errors go to a ring buffer, to a file beside the database, and
+   (deduplicated per condition) to `ALERT_WEBHOOK_URL`. `HEARTBEAT_URL` is
+   pinged on a timer.
+
+**Why verification is not optional.** A backup nobody has opened is a guess, and
+the specific way this fails is not a crash: an empty SQLite file is *structurally
+valid*. It passes every check there is and restores to an event with nobody in
+it. So the counts are the assertion, compared against the database the copy was
+taken from, and a snapshot that fails is deleted rather than kept — a file in
+that directory reads as a backup to everything downstream, so a bad one is worse
+than none because it makes the count go up.
+
+**Why the heartbeat is the answer to "SMS", and the webhook is not.** Nothing
+running inside this process can report that this process has stopped. A machine
+that has wedged its event loop, filled its disk, or been killed shares the fate
+of every check that lives in it. So the only alarm that survives the failure it
+watches for is an external dead-man's switch that pages when the pings *stop* —
+which is why `HEARTBEAT_URL` is the setting the deploy check names, and the
+in-process webhook is for the smaller class of problem the server is still
+healthy enough to describe. For the same reason a failed alert delivery is
+recorded and never re-alerted: announcing a broken alert channel through the
+alert channel is a loop.
+
+**Why staleness is measured from the last verified run, not the newest file.**
+A run that finds the database unchanged discards the duplicate, so during quiet
+hours the newest file keeps ageing while the backups are fine. Reading the
+file's age there pages someone at 3am about nothing. (Found in the browser, not
+in review — and worth knowing that during the event the dedupe will almost never
+fire, because `markUsed` writes `access_codes.last_used_at` on every schedule
+fetch and one phone refetching is enough to make the bytes differ.)
+
+**Why health stays narrow.** Non-200 means *phones are not being served* and
+nothing else, because that is the endpoint that pages someone, and a monitor
+that fires on a degraded-but-working condition gets ignored — taking the real
+alarm with it. Stale backups are a real problem for the panel and the alert
+channel to raise, not a reason to report a site down that is serving 280 people
+correctly. The one thing health gained is the case item 22 found: a deploy with
+no client bundle answers 200 with a plain-text placeholder, so "up" was not the
+same question as "working".
+
+**Rejected: shipping to a specific object store.** Two generic mechanisms
+instead — an HTTP upload and an arbitrary command — because the honest answer to
+"where do the backups go" depends on what the event has an account for, and that
+should not be re-litigated at T-2 days. `BACKUP_TARGET_CMD` covers signed object
+stores without a SigV4 implementation living in this repo.
+
+**Rejected: an alert on every failed snapshot.** Three consecutive failures, or
+nothing verified for three intervals. One failed upload during venue wifi is not
+worth walking away from the check-in desk for, and an alert channel that cries
+wolf is muted before the event starts.

@@ -17,6 +17,8 @@
     "seed:reset": "node server/seed.js --reset",
     "codes": "node server/codes.js",
     "preflight": "node scripts/preflight.js",
+    "backup": "node scripts/backup.js",
+    "restore": "node scripts/restore.js",
     "load-test": "node scripts/load-test.js",
     "test": "node --test tests/*.test.js",
     "ci": "npm run build && npm test",

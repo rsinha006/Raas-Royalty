@@ -51,6 +51,10 @@ const GOOD_ENV = {
   DB_PATH: '/data/royalty.db',
   TRUST_PROXY: '1',
   KEEP_ALIVE_TIMEOUT_MS: '65000',
+  // Item 23. A production environment with no off-box target and nothing
+  // watching from outside is not a clean one, whatever else is set.
+  BACKUP_TARGET_URL: 'https://backups.example.org/royalty',
+  HEARTBEAT_URL: 'https://hc-ping.com/00000000-0000-0000-0000-000000000000',
 };
 
 /**
@@ -79,6 +83,50 @@ describe('deploy config — what refuses to boot', () => {
     assert.equal(production, true);
     const bad = failing(checks, 'warn').filter((c) => c.id !== 'client-build');
     assert.deepEqual(bad.map((c) => c.id), [], 'unexpected failures');
+  });
+
+  /**
+   * Item 23's two checks. Both are warnings under the rule at the top of
+   * `deploy-config.js` — a machine with no backup target still serves 280
+   * people correctly, and a restart at 2am must not be blocked by one. It is
+   * `npm run preflight`, which treats warnings as failures, that has to be
+   * green before the event.
+   */
+  test('snapshots that never leave the volume are a warning, not silence', () => {
+    const env = { ...GOOD_ENV };
+    delete env.BACKUP_TARGET_URL;
+    const c = byId(inspect(env).checks, 'backups-off-box');
+    assert.equal(c.ok, false);
+    assert.equal(c.level, 'warn');
+    assert.match(c.detail, /same volume/);
+  });
+
+  test('snapshots turned off entirely says so, rather than reading as unshipped', () => {
+    const env = { ...GOOD_ENV, BACKUP_INTERVAL_MS: '0' };
+    delete env.BACKUP_TARGET_URL;
+    assert.match(byId(inspect(env).checks, 'backups-off-box').detail, /no snapshots/);
+  });
+
+  test('a command target counts as off-box just as a URL does', () => {
+    const env = { ...GOOD_ENV, BACKUP_TARGET_CMD: 'aws s3 cp {file} s3://royalty/{name}' };
+    delete env.BACKUP_TARGET_URL;
+    assert.equal(byId(inspect(env).checks, 'backups-off-box').ok, true);
+  });
+
+  test('a missing heartbeat warns, because nothing else can report this machine down', () => {
+    const env = { ...GOOD_ENV };
+    delete env.HEARTBEAT_URL;
+    const c = byId(inspect(env).checks, 'alerting');
+    assert.equal(c.ok, false);
+    assert.equal(c.level, 'warn');
+  });
+
+  test('an error webhook alone does not satisfy it', () => {
+    // A process that has crashed cannot post to a webhook. The dead-man's
+    // switch is the only alarm that survives what it is watching for.
+    const env = { ...GOOD_ENV, ALERT_WEBHOOK_URL: 'https://hooks.example.org/x' };
+    delete env.HEARTBEAT_URL;
+    assert.equal(byId(inspect(env).checks, 'alerting').ok, false);
   });
 
   test('the default admin password is a boot failure, not a warning', () => {

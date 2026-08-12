@@ -33,6 +33,14 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.join(__dirname, '..', '..');
 
+/**
+ * Where the built client lives. Exported because three places need to agree on
+ * it — the static middleware in `app.js`, the boot check below, and the health
+ * check in `ops.js`, whose whole job is to notice that this directory is
+ * missing. Two of the three computing it separately is how they drift.
+ */
+export const CLIENT_DIST = path.join(APP_ROOT, 'client', 'dist');
+
 /** The password `adminPassword()` falls back to. Kept in sync by a test. */
 export const DEFAULT_ADMIN_PASSWORD = 'royalty-admin';
 
@@ -62,7 +70,7 @@ export function inspectDeployConfig({
   env = process.env,
   dbPath,
   appRoot = APP_ROOT,
-  clientDist = path.join(APP_ROOT, 'client', 'dist'),
+  clientDist = CLIENT_DIST,
   nodeVersion = process.versions.node,
 } = {}) {
   const production = env.NODE_ENV === 'production';
@@ -257,6 +265,64 @@ export function inspectDeployConfig({
       `KEEP_ALIVE_TIMEOUT_MS=${keepAlive}. Fly's proxy closes idle backend connections at 60s; ` +
         'ours has to be above that so the proxy always closes first.',
       'KEEP_ALIVE_TIMEOUT_MS=65000, and lower it only to stay above a shorter proxy timeout.'
+    )
+  );
+
+  /* -------------------------------- backups ------------------------------- */
+
+  /**
+   * Item 23. Both are `warn` under the rule at the top of this file — a machine
+   * with no backup target still serves 280 people correctly, and refusing to
+   * boot at 2am over a missing env var would be the more expensive failure.
+   * `npm run preflight` is where these have to be green, and the pre-event
+   * checklist in docs/ops.md is where that gets run.
+   *
+   * The snapshot interval defaults to five minutes in production, so the first
+   * check is about *where the copies go*: a snapshot on the same volume as the
+   * database it copies is a restore path for a bad import, and no protection at
+   * all against losing the volume.
+   */
+  const backupInterval = Number(env.BACKUP_INTERVAL_MS ?? (production ? 300_000 : 0));
+  const offBox = Boolean(env.BACKUP_TARGET_URL || env.BACKUP_TARGET_CMD);
+  checks.push(
+    check(
+      'backups-off-box',
+      'warn',
+      offBox && backupInterval > 0,
+      'Database snapshots are taken and sent off this machine',
+      !backupInterval
+        ? 'BACKUP_INTERVAL_MS=0 — no snapshots are being taken at all. The only copy of the ' +
+          'event is the live database.'
+        : offBox
+          ? `Every ${Math.round(backupInterval / 1000)}s, shipped via ` +
+            `${env.BACKUP_TARGET_CMD ? 'BACKUP_TARGET_CMD' : 'BACKUP_TARGET_URL'}.`
+          : `Every ${Math.round(backupInterval / 1000)}s, but only onto the same volume as the ` +
+            'database. That survives a bad import; it does not survive losing the volume.',
+      'fly secrets set BACKUP_TARGET_URL=…  (or BACKUP_TARGET_CMD="aws s3 cp {file} s3://…"). See docs/ops.md.'
+    )
+  );
+
+  /* ------------------------------- alerting ------------------------------- */
+
+  /**
+   * The heartbeat is the one that matters, and it is worth being clear why:
+   * nothing running inside this process can report that this process has
+   * stopped. An external dead-man's switch that pages when the pings stop is
+   * the only alarm that survives the failure it is watching for.
+   */
+  const heartbeat = Boolean(env.HEARTBEAT_URL);
+  const webhook = Boolean(env.ALERT_WEBHOOK_URL);
+  checks.push(
+    check(
+      'alerting',
+      'warn',
+      heartbeat,
+      'Something outside this machine notices when it stops',
+      heartbeat
+        ? `HEARTBEAT_URL is set${webhook ? ', and ALERT_WEBHOOK_URL for in-process errors.' : '.'}`
+        : 'HEARTBEAT_URL is unset. Nothing on this machine can report that this machine is down — ' +
+          'a dead-man\'s switch that pages when the pings stop is the only alarm that survives it.',
+      'HEARTBEAT_URL=https://hc-ping.com/<uuid> with SMS on that check. See docs/ops.md.'
     )
   );
 

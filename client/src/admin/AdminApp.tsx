@@ -9,9 +9,10 @@ import ImportPanel from './ImportPanel';
 import LogPanel from './LogPanel';
 import CodesPanel from './CodesPanel';
 import ViewAsPanel from './ViewAsPanel';
+import OpsPanel from './OpsPanel';
 import Loading from '../Loading';
 
-type Tab = 'overview' | 'schedule' | 'roster' | 'viewAs' | 'codes' | 'import' | 'log';
+type Tab = 'overview' | 'schedule' | 'roster' | 'viewAs' | 'codes' | 'import' | 'log' | 'ops';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'overview', label: 'Overview' },
@@ -21,6 +22,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'codes', label: 'Access codes' },
   { id: 'import', label: 'Import & Sync' },
   { id: 'log', label: 'Change log' },
+  { id: 'ops', label: 'Ops' },
 ];
 
 interface SessionInfo {
@@ -130,6 +132,9 @@ export default function AdminApp() {
         {tab === 'codes' && <CodesPanel key={refreshKey} />}
         {tab === 'import' && <ImportPanel onChanged={refresh} />}
         {tab === 'log' && <LogPanel refreshKey={refreshKey} onChanged={refresh} />}
+        {/* Not keyed on refreshKey: it polls on its own, and remounting it on
+            every schedule edit would throw away a notice someone is reading. */}
+        {tab === 'ops' && <OpsPanel />}
       </div>
     </div>
   );

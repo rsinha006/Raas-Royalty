@@ -72,7 +72,13 @@ function reachedThroughTeam(personId) {
   );
 }
 
-function accessFor(type, id) {
+/**
+ * Exported for the printed call sheets (item 28), whose desk index answers the
+ * same question on paper: how does this person actually get in. One rule in one
+ * place — a second copy would drift, and the drift would be discovered at a
+ * check-in desk.
+ */
+export function accessFor(type, id) {
   if (type === 'team') {
     return {
       route: ROUTES.TEAM,

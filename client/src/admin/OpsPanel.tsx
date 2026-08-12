@@ -59,6 +59,20 @@ interface OpsData {
   startedAt: string;
 }
 
+/** Item 28's half: the pack that gets printed, and whether it covers everybody. */
+interface CallSheetSummary {
+  generatedAt: string;
+  onCall: { name: string | null; phone: string | null; set: boolean };
+  coverage: {
+    sheets: number;
+    people: number;
+    placed: number;
+    unplaced: { name: string; why: string }[];
+    unprinted: { day: string; time: string; activity: string; target: string }[];
+    withoutCode: number;
+  };
+}
+
 const mb = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`;
 
 /** "every 15s" / "every 5 min" — an interval under a minute rounded to minutes reads as 0. */
@@ -75,6 +89,7 @@ function ago(seconds: number | null): string {
 
 export default function OpsPanel() {
   const [data, setData] = useState<OpsData | null>(null);
+  const [paper, setPaper] = useState<CallSheetSummary | null>(null);
   const [busy, setBusy] = useState<'backup' | 'alert' | null>(null);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'bad'; text: string } | null>(null);
 
@@ -83,6 +98,11 @@ export default function OpsPanel() {
       setData(await api.get<OpsData>('/api/admin/ops'));
     } catch {
       setData(null);
+    }
+    try {
+      setPaper(await api.get<CallSheetSummary>('/api/admin/call-sheets/summary'));
+    } catch {
+      setPaper(null);
     }
   }, []);
 
@@ -232,6 +252,93 @@ export default function OpsPanel() {
               <code>docs/ops.md</code>.
             </p>
           </details>
+        )}
+      </div>
+
+      {/* Item 28. Everything above assumes the app comes back. This is the page
+          for when it does not: print it before the doors open, because a
+          printer is the one thing a venue never has when it is needed. */}
+      <div className="card">
+        <h3>Printed fallback</h3>
+        <p className="small muted">
+          One sheet per team and per staff role, built from the same query the phones run — so
+          paper and screen cannot disagree about who is where. Print it before the event: if the
+          app is down at 1pm Saturday, this is the schedule.
+        </p>
+
+        <div className="list-row">
+          <div>
+            <div className="label">
+              {paper
+                ? `${paper.coverage.sheets} sheets · ${paper.coverage.placed} of ${paper.coverage.people} people`
+                : 'Call sheets'}
+            </div>
+            <div className="sub">
+              Every block is stamped with the time it was printed, and says the phone wins.
+            </div>
+          </div>
+          <div className="row">
+            <a className="btn sm" href="/api/admin/call-sheets?scope=handout" target="_blank" rel="noreferrer">
+              Print the pack
+            </a>
+            <a
+              className="btn sm ghost"
+              href="/api/admin/call-sheets?scope=desk"
+              target="_blank"
+              rel="noreferrer"
+            >
+              Print the desk index
+            </a>
+          </div>
+        </div>
+
+        <p className="tiny faint" style={{ marginTop: 8 }}>
+          ⚠️ The desk index lists live access codes, which are passwords in a link. It stays behind
+          the check-in desk; the pack is the one that gets handed out.
+        </p>
+
+        {paper && !paper.onCall.set && (
+          <div className="banner info" style={{ marginTop: 10 }}>
+            <span aria-hidden="true">⚠️</span>
+            <span>
+              Nobody is named as on call for the app — the desk sheet prints a blank line where the
+              number should be. Set <code>ON_CALL_NAME</code> and <code>ON_CALL_PHONE</code>, and
+              not to somebody who is also running a camera.
+            </span>
+          </div>
+        )}
+
+        {paper && paper.coverage.unplaced.length > 0 && (
+          <div className="banner info" style={{ marginTop: 10 }}>
+            <span aria-hidden="true">⚠️</span>
+            <span>
+              {paper.coverage.unplaced.length} on the roster reach no sheet at all:{' '}
+              {paper.coverage.unplaced.map((p) => p.name).join(', ')}. They are on no team and hold
+              no role, so nothing knows where to print them.
+            </span>
+          </div>
+        )}
+
+        {paper && paper.coverage.unprinted.length > 0 && (
+          <div className="banner info" style={{ marginTop: 10 }}>
+            <span aria-hidden="true">⚠️</span>
+            <span>
+              {paper.coverage.unprinted.length} block
+              {paper.coverage.unprinted.length === 1 ? '' : 's'} appear on no sheet — usually a role
+              nobody holds. First:{' '}
+              <em>
+                {paper.coverage.unprinted[0].activity} → {paper.coverage.unprinted[0].target}
+              </em>
+              . These reach no phone either.
+            </span>
+          </div>
+        )}
+
+        {paper && paper.coverage.withoutCode > 0 && (
+          <p className="tiny faint" style={{ marginTop: 8 }}>
+            {paper.coverage.withoutCode} on the roster have no live access code and cannot open the
+            app at all. The desk index names them; issue codes in <strong>Access codes</strong>.
+          </p>
         )}
       </div>
 

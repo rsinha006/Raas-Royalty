@@ -102,8 +102,15 @@ never arrived, and finding that out on the Friday is too late.
 
 ## During the event
 
+The desk-facing version of everything below is printed on the **desk index**
+(item 28): every name, how they sign in, and their live code, on one page behind
+the desk. `npm run callsheets`, or Ops → Printed fallback. See
+[admin-guide.md](admin-guide.md).
+
 **"I lost my link."** Find them in **Access codes**, copy their link, send it
-again. The code has not changed and nothing is invalidated.
+again. The code has not changed and nothing is invalidated. A *dancer* is given
+their **team's** link — they pick their own name when it opens — and never a
+personal one, because they do not have one.
 
 **"My phone was stolen."** Revoke, then regenerate, then send the new link. The
 old one stops working immediately — the session is re-checked against the code
@@ -120,4 +127,6 @@ holding the old one gets a sign-in screen with no explanation of why. That is
 correct behaviour and it is also a support conversation, so do it deliberately.
 
 The printed fallback call sheets are item 28, and they are not optional: if the
-app is down at 1pm Saturday you need paper, not a rollback.
+app is down at 1pm Saturday you need paper, not a rollback. They are built —
+`npm run callsheets` — and the pack that gets handed out deliberately carries
+no codes. Only the desk index does.

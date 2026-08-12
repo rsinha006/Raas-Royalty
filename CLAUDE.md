@@ -21,7 +21,7 @@ otherwise the reasoning is lost between sessions and gets re-litigated.
 npm install && npm run seed && npm run build && npm start   # http://localhost:4000
 npm run dev          # hot reload: client :5173, API :4000
 npm run seed:reset   # rebuild placeholder data from scratch
-npm test             # 507 tests
+npm test             # 539 tests
 npm run ci           # what CI runs: the client typecheck and build, then the tests
 npm run codes -- --list   # every live access code and its subject
 npm run days              # the four event days; --friday YYYY-MM-DD moves them all
@@ -31,10 +31,12 @@ npm run load-test         # 600 virtual phones against an isolated fixture DB
 npm run preflight         # the production config checks, against this environment
 npm run backup            # a verified snapshot now; --list shows what is kept
 npm run restore           # what is available to restore; --yes replaces the database
+npm run callsheets        # the printed fallback pack; --check reports who it misses
 ```
 
 Deploying is Fly.io, one machine, one volume — [docs/deploy.md](docs/deploy.md).
 Backups, monitoring and alerting during the event — [docs/ops.md](docs/ops.md).
+The one page for whoever holds the panel — [docs/admin-guide.md](docs/admin-guide.md).
 
 Admin at `/admin` (password `royalty-admin` by default — set
 `ADMIN_PASSWORD`). The viewer needs an access code: open `/s/:code` from the
@@ -59,13 +61,14 @@ React/Vite bundle from `client/dist`. No external services.
 - `server/lib/event-days.js` — re-dating the weekend from one date
 - `server/lib/backup.js` — verified snapshots, retention, the off-box copy
 - `server/lib/ops.js` — error capture, alerts, the heartbeat, `/api/health`
+- `server/lib/call-sheets.js` — the printed fallback pack, and what it leaves out
 - `server/sync/` — the import pipeline
 - `client/sw.js` — the offline shell, emitted by `client/vite-plugin-sw.js`
 - `client/src/tabstrip.ts` — the one ARIA tabs implementation, used by all four
 - `client/src/viewer/` — the participant app
 - `client/src/admin/` — the logistics panel
 
-Thirteen things worth knowing before changing anything:
+Fourteen things worth knowing before changing anything:
 
 **Block targets are four-way, and the fourth is not like the others.** A block
 targets a team, a person, a role, or `everyone` — the announcement audience,
@@ -227,6 +230,21 @@ because nothing running in this process can report that this process stopped.
 `/api/health` fails only when phones are not being served — keep it that narrow,
 and keep it at one indexed row. Runbook: [docs/ops.md](docs/ops.md).
 
+**The printed pack comes from the viewer's own query, and a sheet is a group
+plus its members.** `call-sheets.js` calls `getPersonalizedSchedule` and prints
+what it returns — same rule as `view-as.js`, because paper is read at the moment
+nothing is left to check it against. ⚠️ A team session holds no person-targeted
+and no Captain blocks (the identity step has not happened), so printing that
+view alone yields a sheet with **every airport pickup missing and no error
+anywhere**. Each member therefore gets a section of `their payload \ the shared
+payload`, a set difference on block ids and never a second derivation of who
+sees what. ⚠️ **Codes are on the desk index and on nothing that gets handed
+out** — a team sheet ends up on a green-room wall, and a photograph of it is a
+live credential; there is a test that no code reaches the handout pack. Coverage
+(a person on no sheet, a block on no sheet) is reported rather than assumed,
+because both are silent everywhere else. Guide:
+[docs/admin-guide.md](docs/admin-guide.md).
+
 Data model and spreadsheet templates are documented in [README.md](README.md).
 Loading the real roster and schedule — the order, the tabs, and the two that
 reach nothing — is [docs/loading-data.md](docs/loading-data.md). Getting the
@@ -235,7 +253,7 @@ links to people is [docs/distributing-links.md](docs/distributing-links.md).
 ## Current state
 
 Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13, 14, 19,
-20, 22 and 23 are done. Item 21's accessibility half is done and its hardware
+20, 22, 23 and 28 are done. Item 21's accessibility half is done and its hardware
 half is a checklist in [docs/device-matrix.md](docs/device-matrix.md); items 24
 and 25 have their engineering done and their content half is a gap list in
 [docs/loading-data.md](docs/loading-data.md) — see [PLAN.md](PLAN.md) for what
@@ -254,13 +272,16 @@ come up with the default password or on a disk the next push wipes, the event
 data is copied off the machine every few minutes and verified on the way out,
 the event's own sixteen-tab workbook loads through the same pipeline as
 everything else, every access link knows who it is addressed to and refuses to
-guess when it does not, and 507 tests run in CI.
+guess when it does not, the weekend prints onto paper that cannot disagree with
+the phones, and 539 tests run in CI.
 
 Still not true: **nothing is actually deployed** — item 22 built the config, the
 guardrails and the runbook, but `fly deploy` needs an account and has not been
 run, and the image has never been built. Item 23's snapshots, health check and
 alerting are built and exercised locally, but the backup target, the heartbeat
-and the alert webhook have nothing real to point at until there is a deploy.
+and the alert webhook have nothing real to point at until there is a deploy —
+and nobody is named in `ON_CALL_NAME` / `ON_CALL_PHONE`, so item 28's desk sheet
+prints a blank where the number goes.
 
 **And still no real data** — which is now the only thing in the way. Item 24
 built and demonstrated the path from the workbook into the database; what is

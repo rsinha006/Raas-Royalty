@@ -14,7 +14,7 @@ competition weekend. **Read this at the start of every session.**
 ## Where things stand
 
 **Done: Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13,
-14, 19, 20, 22 and 23. Items 21, 24 and 25 are half done** — item 21's
+14, 19, 20, 22, 23 and 28. Items 21, 24 and 25 are half done** — item 21's
 accessibility and responsive pass has landed and its hardware checks are open;
 items 24 and 25 turned out to have real engineering in them, which is done, and
 what remains of both is the roster itself. Last updated 2026-08-12.
@@ -60,11 +60,17 @@ what remains of both is the roster itself. Last updated 2026-08-12.
   addressed to its captains and a staff member's to themselves, from their own
   address rather than from the coordinator card they share with a dozen other
   people — and a link that cannot be sent stays in the file naming the fix.
-- **507 tests run in CI**, covering authorization negatives, timezone and DST,
+- **The weekend prints.** One sheet per team and per staff role, generated from
+  the same query the phones run, so paper and screen cannot disagree — plus a
+  desk index that answers "I lost my link" without a laptop. The handout pack
+  carries no access codes and the desk index does, which is why they are two
+  documents.
+- **539 tests run in CI**, covering authorization negatives, timezone and DST,
   code management, the schema migrations, broadcast scoping, the item 14
   correctness gaps, the bulk shift, the offline shell, preview fidelity,
   everything undo refuses, the announcement target, the measured colour
-  contrast, the deploy gate, snapshot verification and restore, the import
+  contrast, the deploy gate, snapshot verification and restore, the printed
+  pack's fidelity to the phones and the codes it must never carry, the import
   pipeline — including last year's real spreadsheets, which the importer has to
   refuse without moving the schedule — the event template's own tabs and
   columns, so a renamed one is a red build, and the rule that no shared contact
@@ -94,7 +100,9 @@ the gap list. Phase F is built — what is left in it is running
 `fly deploy` with an account, and pointing the three item 23 secrets at real
 services ([docs/ops.md](docs/ops.md)). Item 21's remaining half needs phones in
 hands, not code — run [docs/device-matrix.md](docs/device-matrix.md) before the
-dress rehearsal.
+dress rehearsal. Item 28's code is done; what it leaves for people is naming the
+on-call ([docs/admin-guide.md](docs/admin-guide.md) has the table to fill in)
+and actually printing the pack, which is worth nothing until the roster is real.
 
 ### Build order
 
@@ -945,7 +953,7 @@ to feed, and it is not in this plan.
 ## Phase E — Testing
 
 The draft had zero automated tests and was verified manually, once. It now has
-338, run in CI on every push.
+539, run in CI on every push.
 
 ### 19. `[x]` Build the automated test suite
 
@@ -1489,12 +1497,72 @@ what this plan missed.
 
 Tag the release. No changes after except genuine emergencies.
 
-### 28. `[ ]` Prep the humans
+### 28. `[x]` Prep the humans
 
 One-page admin guide. Printed fallback call sheets per team and per role —
 non-negotiable; if the app is down at 1pm Saturday you need paper, not a
 rollback. Named on-call person who isn't also running a camera. A decided answer
 for "I lost my link" at the check-in desk.
+
+**Done 2026-08-12** — `server/lib/call-sheets.js`, `scripts/call-sheets.js`, two
+admin routes, a Printed fallback card in the Ops tab, an `on-call` deploy check,
+and 32 new tests (`tests/call-sheets.test.js`, 539 total). The guide is
+[docs/admin-guide.md](docs/admin-guide.md).
+
+```bash
+npm run callsheets             # the pack, into data/call-sheets/
+npm run callsheets -- --check  # who and what reaches no sheet; exits 1 on either
+```
+
+- ⚠️ **The paper is generated from `getPersonalizedSchedule`**, the viewer's own
+  function called with the viewer's own argument shape — the same rule as item
+  16, for a sharper version of the same reason. A preview that disagrees with a
+  phone is embarrassing; paper that disagrees with a phone is two people
+  standing in different rooms, and it is read at the one moment there is nothing
+  left to check it against.
+- ⚠️ **A team sheet is the team *plus its members*, because paper has no
+  identity step.** A team session deliberately holds no person-targeted and no
+  Captain blocks — before somebody taps their name the app cannot know whose
+  phone it is. Printing that view alone produces a sheet with **every airport
+  pickup missing and no error anywhere**. Each member gets a section of `their
+  payload \ the shared payload`, a set difference on block ids rather than a
+  second derivation of who sees what. Two tests hold it: the shared half must
+  *not* contain the pickups, and the sheet must.
+- ⚠️ **Two documents, and the split is the security property.** The handout pack
+  carries schedules and no codes; the one-page desk index carries every code and
+  stays behind the desk. A team sheet ends up taped to a green-room wall, and
+  every photograph of that wall would otherwise be a live credential — one that
+  cannot be revoked without reprinting, by somebody who does not know to. There
+  is a test that no code string reaches the pack.
+- **Coverage is reported, not assumed.** A person on no sheet (on no team and
+  holding no role) and a block on no sheet (usually a role nobody holds) are the
+  two ways a printed pack loses somebody, and both are silent everywhere else —
+  every phone is still correct. `--check` exits 1 on either and the Ops card
+  names them. A dancer whose team was deleted still prints, on the Dancer sheet.
+- **"I lost my link" is decided rather than improvised**, and printed on the
+  desk index: a dancer is given their *team's* link and picks their name, staff
+  are re-sent their own, and regenerating is only for a lost or stolen phone.
+  The sign-in route each person needs comes from `accessFor()` in `view-as.js`
+  — the same rule the panel diagnoses with, not a second copy of it.
+- **The on-call person is `ON_CALL_NAME` / `ON_CALL_PHONE`**, checked at `warn`
+  and printed on the desk sheet, which prints a ruled "NOT SET" line rather than
+  dropping the section. It belongs beside `HEARTBEAT_URL` because it is the
+  other half of the same alarm: item 23 built the thing that pages somebody,
+  this is the somebody.
+
+**Verified in the browser** against the 166-person dev database: 13 sheets
+covering all 166 people, a captain's sheet showing her team's shared schedule
+with her own captain blocks underneath, and the handout pack containing none of
+the 45 live codes.
+
+**Still open — the parts that are people, not code:**
+
+- **Nobody is named on call.** The table in
+  [docs/admin-guide.md](docs/admin-guide.md) is blank, and `preflight` warns.
+- **Nothing has been printed**, because the pack is only as useful as the roster
+  in it — same dependency as items 24 and 25.
+- **The guide has not been read by whoever will hold the panel.** That is what
+  the dress rehearsal is for (item 26).
 
 ---
 
@@ -1513,7 +1581,7 @@ for "I lost my link" at the check-in desk.
 | ~~The app cannot read the workbook logistics actually fills in~~ | Closed — three tabs read by name, both roster tabs in one upload, four event days, and 47 tests including the template's own tabs and columns | 24 |
 | An import silently empties the schedule | Closed — refused on "nothing importable came out" rather than on "rows failed", which is the case a formulas-only Export tab produced | 24 |
 | ~~A mail merge sends a dozen people's private links to one inbox~~ | Closed — recipients come from `people.email` and never from a contact card, which is shared by a whole team; a test mails nothing to a shared card | 25 |
-| Links go out and nobody opens them | Half closed — the panel counts never-used, and `--check` fails when a link has no recipient. Nothing confirms delivery, and nothing sends: the merge is somebody's mailing tool | 25, 28 |
+| Links go out and nobody opens them | Half closed — the panel counts never-used, and `--check` fails when a link has no recipient. Nothing confirms delivery, and nothing sends: the merge is somebody's mailing tool. The desk index means an unopened link is a 10-second fix at check-in rather than a search | 25, 28 |
 | Airport runs and the day grids never reach a phone | Open — `Export` reads from neither, so both look complete and change nothing. Documented in `docs/loading-data.md`; nothing in the workbook says so | 24, 26 |
 | ~~Late schema change forces rework~~ | Closed — model confirmed against past-year data, and applied in item 13 with a migration that runs on boot | 2, 3, 13 |
 | Real roster still not in hand | A people problem, not an engineering one — it was due at T-6 and is the likeliest thing to slip past the rehearsal. The loading path is now built and demonstrated, so this is the only thing between here and a real schedule | 24 |
@@ -1522,7 +1590,9 @@ for "I lost my link" at the check-in desk.
 | A wrong change made under pressure and no way back | Closed — one admin action is one log entry and undo reverts all of it, refusing rather than half-applying | 17 |
 | ~~A deploy comes up with the default admin password, or on a disk the next deploy wipes~~ | Closed — the server refuses to boot in production on either, plus two more that would otherwise pass a health check | 22 |
 | Scaling to a second machine silently forks the database | Half-closed — `--ha=false`, `min_machines_running = 1`, a test, and it is the first thing `docs/deploy.md` says. But nothing can *stop* `fly scale count 2`, so it stays a live risk during event week | 22 |
-| Total app failure during the event | Half closed — verified snapshots every 5 minutes with an off-box copy, a tested restore script, health that fails when phones are not being served, and an external dead-man's switch that pages someone. The targets are unset until the deploy exists, the restore drill is item 26, and the printed fallback is still item 28 | 23, 26, 28 |
+| Printed paper is acted on after it goes stale | Half closed — every page is stamped with the time it was printed and says the phone wins, and the sheets come from the same query the phones run so they never start out disagreeing. Nothing stops somebody reading Thursday's copy on Saturday; saying it out loud when the app is down is in the guide | 28 |
+| A printed sheet leaks a code | Closed — the handout pack carries no access code at all and a test asserts it; the desk index is the only page that does, and it says on it not to be handed out | 28 |
+| Total app failure during the event | Half closed — verified snapshots every 5 minutes with an off-box copy, a tested restore script, health that fails when phones are not being served, an external dead-man's switch that pages someone, and a printed pack built from the same query the phones run. The targets are unset until the deploy exists, the restore drill is item 26, and nothing has actually been printed because the roster is not real | 23, 26, 28 |
 | Unreadable on a real phone in a dark venue | Half closed — every colour is measured against AA and pinned by tests, and the screen is navigable by heading and by keyboard. The notch, the radio and the battery still need hardware | 21 |
 
 ---
@@ -1541,7 +1611,7 @@ the two that actually catch problems.
 | T-3 | Phase D + E (admin tooling, tests, load test) — Phase D ✅, item 19 ✅ and item 20 ✅ done early; item 21's audit ✅. |
 | T-2 | Phase F (deploy, ops) — item 22 ✅ configured and item 23 ✅ built; both need the deploy actually run, and item 23's three secrets pointed at real services. Plus item 21's device checks on real phones. |
 | T-1 | Items 24–26. Items 24 ✅ and 25 ✅ engineering done early; the roster and the dates are the gate for both. Dress rehearsal. |
-| Event week | Items 27–28. Freeze Wednesday. |
+| Event week | Items 27–28. Item 28 ✅ built early; what is left of it is naming the on-call and printing the pack. Freeze Wednesday. |
 | After | Retro. Export the edit log to see what actually changed and how often. |
 
 ---

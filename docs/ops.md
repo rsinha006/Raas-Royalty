@@ -152,6 +152,11 @@ stopped.
 2. Turn on **SMS** to the on-call person from item 28. Email is not enough in a
    gym.
 3. `fly secrets set HEARTBEAT_URL="https://hc-ping.com/<uuid>"`
+4. Name that person to the app as well, so the printed desk sheet has a number
+   on it and `preflight` stops warning:
+   `fly secrets set ON_CALL_NAME="…" ON_CALL_PHONE="…"`. It has to be a name
+   rather than a rota, and not somebody also running a camera — see
+   [admin-guide.md](admin-guide.md).
 
 Then, as a second signal that watches from the other direction, point an
 ordinary uptime monitor at `https://<host>/api/health` — every 1–5 minutes,
@@ -201,7 +206,10 @@ same reason.
 - [ ] `fly machine stop` produced an SMS to the on-call person's phone.
 - [ ] **Send a test** in the Ops tab arrived where someone will see it.
 - [ ] The on-call person from item 28 knows the restore sequence above and has
-      the admin password.
+      the admin password — and is named in `ON_CALL_NAME` / `ON_CALL_PHONE`.
+- [ ] **The paper is printed.** `npm run callsheets`, or Ops → Printed fallback.
+      Everything on this page assumes the app comes back; the pack is what the
+      venue runs on while it does not. See [admin-guide.md](admin-guide.md).
 
 ## Still open
 

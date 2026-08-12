@@ -139,6 +139,25 @@ panel's **Ops** tab, and `HEARTBEAT_URL` pings an external dead-man's switch —
 ⚠️ the only alarm that survives this machine stopping, because nothing running
 on it can report that it stopped.
 
+## Running the event with humans
+
+**[docs/admin-guide.md](docs/admin-guide.md)** is the one page for whoever is
+holding the panel: what to do when the event is running late, what "View as"
+answers, and the decided script for "I lost my link".
+
+```bash
+npm run callsheets             # the printed fallback pack, into data/call-sheets/
+npm run callsheets -- --check  # who or what reaches no sheet; exits 1 on either
+```
+
+The pack is one sheet per team and per staff role, built from the same query the
+phones run, so paper cannot disagree with a screen. A sheet is the group's shared
+schedule *plus a section per member* — ⚠️ paper has no identity step, so a
+dancer's airport pickup has to already be printed on it. It comes in two parts:
+the **handout pack**, which carries no access codes, and a one-page **desk
+index**, which carries every code and stays behind the check-in desk. Also at
+**Admin → Ops → Printed fallback**.
+
 ## Data model
 
 | Table | Notes |

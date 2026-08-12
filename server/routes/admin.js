@@ -44,7 +44,8 @@ import {
 } from '../sync/normalize.js';
 import { applyRosterDiff, computeRosterDiff } from '../sync/diff.js';
 import { uploadSource } from '../sync/sources.js';
-import { adminCodesRouter } from './admin-codes.js';
+import { adminCodesRouter, publicBaseUrl } from './admin-codes.js';
+import { buildCallSheets, renderCallSheets } from '../lib/call-sheets.js';
 import { adminOpsRouter } from './admin-ops.js';
 import { previewFor } from '../lib/view-as.js';
 import { applyUndo, listBatches, planUndo } from '../lib/undo.js';
@@ -1008,6 +1009,45 @@ export function adminRouter({ broadcast }) {
     // must never blur, so a missing subject is a 404 rather than an empty day.
     if (!preview) return res.status(404).json({ error: 'That subject is no longer in the roster.' });
     res.json(preview);
+  });
+
+  /**
+   * The printed fallback pack — item 28. HTML rather than JSON, because what
+   * this endpoint is for is a browser's print dialog: no bundle, no session
+   * state, nothing to render it but the page itself.
+   *
+   * `?scope=handout` drops the desk index, which is the only page carrying
+   * access codes. That split is the point — the pack goes to captains and gets
+   * taped to walls, and a code in a photograph is a live credential.
+   *
+   * `?scope=desk` is the desk index alone, for the reprint after somebody's
+   * code is rotated.
+   */
+  router.get('/call-sheets', (req, res) => {
+    const scope = String(req.query.scope || 'all');
+    const doc = buildCallSheets({ baseUrl: publicBaseUrl(req) });
+    const html = renderCallSheets(doc, {
+      desk: scope !== 'handout',
+      sheets: scope !== 'desk',
+    });
+    // Inline, not an attachment: the next action is Cmd-P, not a download.
+    res.type('html').set('Cache-Control', 'no-store').send(html);
+  });
+
+  /** The same pack's coverage, for the panel's card. Cheap enough to load with the tab. */
+  router.get('/call-sheets/summary', (req, res) => {
+    const doc = buildCallSheets({ baseUrl: publicBaseUrl(req) });
+    res.json({
+      generatedAt: doc.generatedAt,
+      onCall: doc.onCall,
+      coverage: doc.coverage,
+      sheets: doc.sheets.map((s) => ({
+        kind: s.kind,
+        title: s.title,
+        shared: s.sharedCount,
+        people: s.people.length,
+      })),
+    });
   });
 
   /** Convenience for the manual editor: every possible assignment target. */

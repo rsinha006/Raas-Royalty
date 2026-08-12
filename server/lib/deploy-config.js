@@ -326,6 +326,33 @@ export function inspectDeployConfig({
     )
   );
 
+  /* -------------------------------- on call ------------------------------- */
+
+  /**
+   * Item 28. The alarm above pages *somebody* — this is the somebody, and it is
+   * a deploy property for the same reason the webhook is: the person on call
+   * for the app changes with the weekend, not with the roster.
+   *
+   * It is also what the printed desk sheet fills its "On call for the app" line
+   * from, and an unset one prints a ruled blank instead of quietly omitting the
+   * section. `warn`, because a server with no on-call name serves every phone
+   * perfectly well.
+   */
+  const oncall = Boolean((env.ON_CALL_NAME || '').trim() && (env.ON_CALL_PHONE || '').trim());
+  checks.push(
+    check(
+      'on-call',
+      'warn',
+      oncall,
+      'Somebody is named as on call for the app',
+      oncall
+        ? `${env.ON_CALL_NAME.trim()} — ${env.ON_CALL_PHONE.trim()}`
+        : 'ON_CALL_NAME / ON_CALL_PHONE unset. The heartbeat pages an unnamed person, and the ' +
+          'printed desk sheet has a blank where the number should be.',
+      'ON_CALL_NAME="Priya Raman" ON_CALL_PHONE="+1 555 0147" — and not somebody also running a camera.'
+    )
+  );
+
   /* ------------------------------ node version ---------------------------- */
 
   const major = Number(String(nodeVersion).split('.')[0]);

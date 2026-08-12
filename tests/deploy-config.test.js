@@ -55,6 +55,11 @@ const GOOD_ENV = {
   // watching from outside is not a clean one, whatever else is set.
   BACKUP_TARGET_URL: 'https://backups.example.org/royalty',
   HEARTBEAT_URL: 'https://hc-ping.com/00000000-0000-0000-0000-000000000000',
+  // Item 28. The heartbeat above pages somebody; this is who. Part of a clean
+  // environment for the same reason the heartbeat is — an alarm with no name
+  // attached to it is an alarm nobody answers.
+  ON_CALL_NAME: 'Priya Raman',
+  ON_CALL_PHONE: '+1 555 0147',
 };
 
 /**

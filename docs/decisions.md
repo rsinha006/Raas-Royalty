@@ -1418,3 +1418,127 @@ the import's error list.
 be a mobile number and nothing else. Treating email as required would silently
 drop exactly those people, so `Send To Phone` is a column and the readiness
 count reports how many are text-only.
+
+---
+
+## Paper is generated from the viewer's own query, and a team sheet is the team plus its members
+
+**Date:** 2026-08-12 · **Status:** decided
+
+**Question.** Item 28 calls for printed fallback call sheets. Where does the
+content come from, and what is on one sheet?
+
+**Decision.** `server/lib/call-sheets.js` builds them from
+`getPersonalizedSchedule` — the viewer's own function, the viewer's own argument
+shape — and a sheet is a *group plus each of its members*: the shared schedule
+that group's own code shows, then a section per person of what their phone holds
+and the shared part does not, computed as a set difference on block ids. One
+sheet per team, one per staff role, plus a desk index.
+
+**Why.** Paper is reached for at the exact moment there is nothing left to check
+it against. A second query assembling "what a team is doing" would agree with
+the phones on everything anybody thought to compare, and disagree on whatever
+nobody did — and the disagreement would surface as two people standing in
+different rooms. Same rule, and the same reasoning, as "View as" (see that
+entry): the tool that exists to be trusted must not re-derive what it displays.
+
+⚠️ **The members half is not a nicety.** A team session deliberately holds no
+person-targeted and no Captain blocks, because before somebody taps their name
+the app cannot know whose phone it is. Printing that view alone yields a team
+sheet with **every airport pickup missing** and no error anywhere — the sheet
+looks complete. Paper has no identity step, so the sheet has to carry what the
+identity step would have revealed. There is a test asserting both pickups appear
+under their own names.
+
+**Rejected: one sheet per person.** ~280 pages, most of them four lines, and a
+check-in desk cannot find a page in a stack of 280 while somebody waits. Grouped
+sheets are also how the paper is actually used — a captain holds their team's,
+a stage manager holds the roles.
+
+**Coverage is reported rather than assumed.** A person on no sheet and a block
+on no sheet are the two ways a printed pack loses somebody, and both are silent
+in every other screen: the phones are all still correct.
+`npm run callsheets -- --check` exits non-zero on either, and the Ops tab shows
+them.
+
+---
+
+## Access codes are on the desk index and on nothing that gets handed out
+
+**Date:** 2026-08-12 · **Status:** decided
+
+**Question.** The printed pack would be far more useful at a check-in desk with
+each team's link on its sheet. Should it carry codes?
+
+**Decision.** No. The pack (`scope=handout`) carries schedules only; the codes
+live on a separate desk index (`scope=desk`) which is printed separately and
+stays behind the desk. There is a test asserting no code string reaches the
+handout pack.
+
+**Why.** A code is a bearer token — that is the accepted trade in the
+access-code decision, and it is accepted *because* links travel in direct
+messages. A team sheet is handed to 25 dancers and taped to a green-room wall,
+and every photograph of that wall is then a live credential for that team's
+schedule. Unlike a leaked link, paper cannot be revoked without reprinting, and
+nobody would know to.
+
+The desk index is different in kind: it is one page, held by somebody who
+already has the panel password, and its whole purpose is answering "I lost my
+link" without a laptop. It says on it not to hand it out.
+
+---
+
+## The lost-link answer is decided in advance, and it is never "regenerate"
+
+**Date:** 2026-08-12 · **Status:** decided
+
+**Question.** Somebody arrives at the check-in desk without their link. What
+does the person at the desk do?
+
+**Decision.** A dancer is given **their team's** link and picks their own name;
+staff are given **their own** link again. Regeneration is only for a lost or
+stolen *phone*. Printed on the desk index and written in
+[admin-guide.md](admin-guide.md) rather than decided in the moment.
+
+**Why.** Losing a link is not the link being compromised — the old one still
+works, so re-sending costs nothing and breaks nothing. Regenerating in its place
+looks tidier and locks out whoever else is holding that code: for a team link
+that is the entire team, mid-event, from a desk that will not learn it happened.
+The distinction only holds up if it is decided before there is a queue.
+
+The dancer half is the part that gets improvised wrong. Dancers have no personal
+code at all (see the access-code decision), so the instinct to "issue them one"
+mints exactly the unmanaged credential that decision exists to avoid. The desk
+index therefore prints *how each person signs in*, from `accessFor()` in
+`view-as.js` — the same rule the panel diagnoses with, rather than a second copy
+that would drift.
+
+---
+
+## The on-call person is deploy configuration, and has to be a name
+
+**Date:** 2026-08-12 · **Status:** decided
+
+**Question.** Item 23 built an alarm that pages somebody. Item 28 asks who. Is
+that a roster row, a contact card, or configuration?
+
+**Decision.** `ON_CALL_NAME` / `ON_CALL_PHONE` in the environment, checked at
+`warn` by `deploy-config.js` and printed on the desk sheet. Unset prints a ruled
+blank line saying so.
+
+**Why.** It is a property of the weekend and of the deploy, not of the
+spreadsheet: the same human is on the roster in some other capacity, and the
+question here is who answers a 3am SMS about this process. Keeping it beside
+`HEARTBEAT_URL` and `ALERT_WEBHOOK_URL` means the three parts of one alarm are
+configured together, and `npm run preflight` reports the whole chain.
+
+`warn`, not `fail`, under the rule at the top of `deploy-config.js` — a server
+with nobody named still serves 280 people perfectly.
+
+Two constraints go with the name, and they are in the guide because they are the
+ones that get violated: it must be **a person, not a rota** ("whoever notices"
+is nobody), and not somebody also running a camera or a stage, because answering
+this means stopping for twenty minutes.
+
+⚠️ **The blank is deliberate.** A desk sheet that omits the section when nobody
+is set reads as finished; a ruled line with "NOT SET" on it gets filled in.

@@ -33,6 +33,29 @@ interface MissingSubject {
   label: string;
 }
 
+interface DistributionRow {
+  subjectType: 'team' | 'person' | 'role';
+  subjectLabel: string | null;
+  teamName: string | null;
+  code: string;
+  link: string;
+  lastUsedAt: string | null;
+  recipients: { personId: string; name: string; email: string | null; phone: string | null; why: string }[];
+  blocked: string | null;
+}
+
+interface DistributionData {
+  rows: DistributionRow[];
+  summary: {
+    total: number;
+    sendable: number;
+    blocked: number;
+    recipients: number;
+    withoutEmail: number;
+    alreadyUsed: number;
+  };
+}
+
 interface CodesData {
   codes: Code[];
   missing: MissingSubject[];
@@ -155,12 +178,15 @@ export default function CodesPanel() {
           </a>
         </div>
         <p className="tiny faint" style={{ marginTop: 8 }}>
-          One row per live code, with the link already built. Links point at{' '}
-          <code>{data.linkBase}</code> — set <code>PUBLIC_BASE_URL</code> if that isn't the address
-          attendees use. There is no email column: nobody's own address is stored anywhere in this
-          app, so join the file to your own contact list on the subject name.
+          One row per recipient, with the link already built and the address to send it to. Links
+          point at <code>{data.linkBase}</code> — set <code>PUBLIC_BASE_URL</code> if that isn't the
+          address attendees use. <strong>Send To</strong> is each person's own address off the
+          roster, never a contact card: a card is the coordinator they should call, and it is shared
+          by a whole team.
         </p>
       </div>
+
+      <Distribution />
 
       {summary.missing > 0 && (
         <div className="card">
@@ -416,6 +442,106 @@ function BulkRegenerate({ busy, act, live }: { busy: boolean; act: Act; live: nu
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Readiness for item 25: not "does everyone have a link" — the card above
+ * answers that — but "can everyone be *sent* one", which is the question with a
+ * deadline on it. A blocked row names the fix, because the fix is nearly always
+ * a cell in the spreadsheet and the person reading this is the person who can
+ * change it.
+ */
+function Distribution() {
+  const [data, setData] = useState<DistributionData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
+
+  useEffect(() => {
+    api
+      .get<DistributionData>('/api/admin/codes/distribution')
+      .then(setData)
+      .catch((e) => setError(e.message));
+  }, []);
+
+  if (error) return <div className="card"><div className="banner offline">{error}</div></div>;
+  if (!data) return <Loading label="Working out who each link goes to…" />;
+
+  const { summary } = data;
+  const blocked = data.rows.filter((r) => r.blocked);
+  const shown = showAll ? data.rows : blocked;
+
+  return (
+    <div className="card">
+      <h3>Ready to send</h3>
+      <p className="small muted">
+        Team links go to that team's captains, who pass them on. Staff links go to the person
+        themselves. Send early — a lost link is a conversation you want before Friday, not at the
+        check-in desk on the day.
+      </p>
+
+      <div className="stat-grid" style={{ marginTop: 12 }}>
+        <div className="stat">
+          <div className="n">{summary.sendable}</div>
+          <div className="k">Links sendable</div>
+        </div>
+        <div className="stat">
+          <div className="n">{summary.recipients}</div>
+          <div className="k">Messages</div>
+        </div>
+        <div className="stat">
+          <div className="n">{summary.blocked}</div>
+          <div className="k">Blocked</div>
+        </div>
+        <div className="stat">
+          <div className="n">{summary.withoutEmail}</div>
+          <div className="k">By text only</div>
+        </div>
+        <div className="stat">
+          <div className="n">{summary.alreadyUsed}</div>
+          <div className="k">Already opened</div>
+        </div>
+      </div>
+
+      {summary.blocked > 0 ? (
+        <div className="banner info" style={{ marginTop: 12 }}>
+          <span aria-hidden="true">⚠️</span>
+          <span>
+            {summary.blocked} link{summary.blocked === 1 ? '' : 's'} cannot be sent to anyone yet.
+            They are still in the CSV, with the reason in the <strong>Blocked</strong> column.
+          </span>
+        </div>
+      ) : (
+        <div className="banner good" style={{ marginTop: 12 }}>
+          <span aria-hidden="true">✅</span>
+          <span>Every live link has somebody to go to.</span>
+        </div>
+      )}
+
+      {shown.length > 0 && (
+        <div className="scroll-list" style={{ marginTop: 10, maxHeight: 260 }}>
+          {shown.map((r) => (
+            <div key={r.code} className="list-row">
+              <div>
+                <strong>{r.subjectLabel ?? '(unknown)'}</strong>{' '}
+                <span className="tiny faint">{r.subjectType}</span>
+                <div className="tiny faint">
+                  {r.blocked
+                    ? r.blocked
+                    : r.recipients
+                        .map((p) => `${p.name} · ${p.email ?? p.phone}`)
+                        .join(' · ')}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <button className="btn sm" style={{ marginTop: 10 }} onClick={() => setShowAll((v) => !v)}>
+        {showAll ? `Show only the ${blocked.length} blocked` : `Show all ${data.rows.length}`}
+      </button>
     </div>
   );
 }

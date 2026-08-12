@@ -286,20 +286,59 @@ describe('the People tab', () => {
     assert.equal(errors[0].sheet, 'People');
   });
 
-  test('the contact card is built from the Phone and Email columns', async () => {
+  test('⚠️ Phone and Email are the person’s own, and are not a contact card', async () => {
+    // These two are different things and conflating them is item 25's bug:
+    // `contact` is the card this person should *call* — their liaison — and it
+    // is shared by everyone who calls the same person. Building it out of their
+    // own columns made 280 people their own coordinator and showed every dancer
+    // their own phone number under "Your contact".
     const { rows } = await peopleRows(
-      ['BRD-01', 'Ada Director', 'Directors', '', '(925)-430-8287', 'ada@x.edu', 'board', '']
+      ['BRD-01', 'Ada Director', 'Directors', '', '(925)-430-8287', 'Ada@X.edu', 'board', '']
     );
-    assert.deepEqual(rows[0].contact, {
-      name: 'Ada Director',
-      phone: '925-430-8287',
-      email: 'ada@x.edu',
-    });
+    assert.equal(rows[0].phone, '925-430-8287');
+    assert.equal(rows[0].email, 'ada@x.edu', 'lower-cased, because a merge joins on it');
+    assert.equal(rows[0].contact, null);
   });
 
-  test('a row with neither gets no card rather than an empty one', async () => {
+  test('a named Contact Person/Method is still somebody else’s card', async () => {
+    // The CSV template's column, unchanged: it names a coordinator.
+    const { rows } = await normalizeRosterSheets([
+      {
+        sheetName: 'People',
+        rows: [
+          {
+            __row: 2,
+            __sheet: 'People',
+            name: 'Ada Director',
+            role: 'board',
+            'contact person/method': 'Marcus Bell / 555-0102',
+            email: 'ada@x.edu',
+          },
+        ],
+      },
+    ]);
+    assert.equal(rows[0].email, 'ada@x.edu', 'their own address survives');
+    assert.deepEqual(rows[0].contact, { name: 'Marcus Bell', phone: '555-0102', email: null });
+  });
+
+  test('a bare method in that column is their own details, not a card named after them', async () => {
+    const { rows } = await normalizeRosterSheets([
+      {
+        sheetName: 'People',
+        rows: [
+          { __row: 2, __sheet: 'People', name: 'Ada Director', role: 'board', contact: 'ada@x.edu' },
+        ],
+      },
+    ]);
+    assert.equal(rows[0].email, 'ada@x.edu');
+    assert.equal(rows[0].contact, null);
+  });
+
+  test('a row with neither gets nothing rather than an empty card', async () => {
     const { rows } = await peopleRows(['BRD-01', 'Ada Director', 'Directors', '', '', '', 'board', '']);
     assert.equal(rows[0].contact, null);
+    assert.equal(rows[0].email, null);
+    assert.equal(rows[0].phone, null);
   });
 });
 

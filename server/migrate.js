@@ -77,6 +77,29 @@ export function runMigrations(db) {
        ON teams(show_order) WHERE show_order IS NOT NULL`
   );
 
+  /* ---- people.email / people.phone — how a person is *reached* ---- */
+
+  /**
+   * A participant's own address, which nothing in this app held until item 25.
+   *
+   * ⚠️ This is deliberately not `people.contact_id`. That column is the card a
+   * person should **call** — their liaison or coordinator — and it is shared:
+   * in the seed every dancer on a team points at that team's liaison, and a
+   * dozen exec board members point at the Event Director. Reading it as "where
+   * to send this person's link" mails a dozen private access links to one
+   * inbox, and the file looks perfectly plausible on the way past.
+   *
+   * `docs/decisions.md` deferred these columns until real per-person details
+   * existed to put in them. The event template's People and Roster tabs carry
+   * `Phone` and `Email`, so they now do.
+   */
+  for (const col of ['email', 'phone']) {
+    if (!columnNames(db, 'people').has(col)) {
+      db.exec(`ALTER TABLE people ADD COLUMN ${col} TEXT`);
+      applied.push(`people.${col}`);
+    }
+  }
+
   /* ---- people.role_id → person_roles ---- */
 
   /**

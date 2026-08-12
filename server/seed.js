@@ -204,13 +204,23 @@ const seed = db.transaction(() => {
 
   /* -------------------- people -------------------- */
   const insPerson = db.prepare(
-    'INSERT INTO people (id, name, team_id, contact_id) VALUES (?, ?, ?, ?)'
+    'INSERT INTO people (id, name, team_id, contact_id, email, phone) VALUES (?, ?, ?, ?, ?, ?)'
   );
   const insPersonRole = db.prepare(
     'INSERT INTO person_roles (person_id, role_id) VALUES (?, ?)'
   );
+  let personCounter = 500;
+  /**
+   * ⚠️ `email`/`phone` are the person's own, and `contactId` is somebody else's
+   * — the coordinator they should call. Item 25 sends a link to the first and
+   * would mail a dozen of them to one inbox using the second. They are two
+   * columns on purpose; see docs/decisions.md.
+   *
+   * Seeded for everyone so the placeholder data exercises the distribution
+   * readiness check rather than reporting every subject as unreachable.
+   */
   const addPerson = (id, name, roleIds, teamId, contactId) => {
-    insPerson.run(id, name, teamId, contactId);
+    insPerson.run(id, name, teamId, contactId, email(name), phone(personCounter++));
     for (const roleId of roleIds) insPersonRole.run(id, roleId);
   };
   const people = { dancer: [], exec: [], judge: [], videographer: [], sponsor: [], logistics: [] };

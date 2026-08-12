@@ -21,10 +21,12 @@ otherwise the reasoning is lost between sessions and gets re-litigated.
 npm install && npm run seed && npm run build && npm start   # http://localhost:4000
 npm run dev          # hot reload: client :5173, API :4000
 npm run seed:reset   # rebuild placeholder data from scratch
-npm test             # 488 tests
+npm test             # 507 tests
 npm run ci           # what CI runs: the client typecheck and build, then the tests
 npm run codes -- --list   # every live access code and its subject
 npm run days              # the four event days; --friday YYYY-MM-DD moves them all
+npm run codes -- --check       # coverage AND reachability; exits 1 on either
+npm run codes -- --send-list   # every access link and the address it goes to
 npm run load-test         # 600 virtual phones against an isolated fixture DB
 npm run preflight         # the production config checks, against this environment
 npm run backup            # a verified snapshot now; --list shows what is kept
@@ -53,6 +55,8 @@ React/Vite bundle from `client/dist`. No external services.
 - `server/lib/live.js` — socket rooms, scoped broadcasts, the origin policy
 - `server/lib/event-time.js` — the venue timezone; wall-clock → instant
 - `server/db.js` — `target_versions`: per-subject "last updated"
+- `server/lib/distribution.js` — who each access link is sent to, and why not
+- `server/lib/event-days.js` — re-dating the weekend from one date
 - `server/lib/backup.js` — verified snapshots, retention, the off-box copy
 - `server/lib/ops.js` — error capture, alerts, the heartbeat, `/api/health`
 - `server/sync/` — the import pipeline
@@ -100,6 +104,18 @@ anything that does not calculate them reads as a few note rows and no errors at
 all, and applying that against `removeMissing` deletes every managed block
 behind a green result. A row with one non-empty cell is a note (the Export tab
 ends with three), not five errors on every correct import.
+
+**A person's own address and the card they call are different columns.**
+`people.email` / `people.phone` are theirs, and are how item 25 sends them their
+access link. `people.contact_id` is the card they should *call* — a dancer's
+team liaison — and it is **shared**: every dancer on a team points at the same
+one. ⚠️ Building a send list out of `contact_id` mails a dozen private bearer
+tokens to one inbox and looks entirely correct doing it, which is why
+`server/lib/distribution.js` reads `people.email` and nothing else and a test
+mails nothing to a shared card. The roster reader splits the two in
+`rosterContacts`, at the point they are read, rather than leaving every consumer
+to know the difference — item 24's first cut did not, and made 280 people their
+own coordinator with every dancer shown their own phone number.
 
 **The roster is two tabs, and a default role belongs to a sheet.** `People`
 carries `Full Name` and a `Type` in the event's vocabulary; `Roster` splits the
@@ -213,14 +229,15 @@ and keep it at one indexed row. Runbook: [docs/ops.md](docs/ops.md).
 
 Data model and spreadsheet templates are documented in [README.md](README.md).
 Loading the real roster and schedule — the order, the tabs, and the two that
-reach nothing — is [docs/loading-data.md](docs/loading-data.md).
+reach nothing — is [docs/loading-data.md](docs/loading-data.md). Getting the
+links to people is [docs/distributing-links.md](docs/distributing-links.md).
 
 ## Current state
 
 Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13, 14, 19,
 20, 22 and 23 are done. Item 21's accessibility half is done and its hardware
-half is a checklist in [docs/device-matrix.md](docs/device-matrix.md); item 24's
-engineering half is done and its content half is a gap list in
+half is a checklist in [docs/device-matrix.md](docs/device-matrix.md); items 24
+and 25 have their engineering done and their content half is a gap list in
 [docs/loading-data.md](docs/loading-data.md) — see [PLAN.md](PLAN.md) for what
 each one settled. In short: the viewer is behind
 access codes enforced server-side, event times are resolved against the venue's
@@ -236,7 +253,8 @@ screen reader with every colour measured against AA, a production deploy cannot
 come up with the default password or on a disk the next push wipes, the event
 data is copied off the machine every few minutes and verified on the way out,
 the event's own sixteen-tab workbook loads through the same pipeline as
-everything else, and 488 tests run in CI.
+everything else, every access link knows who it is addressed to and refuses to
+guess when it does not, and 507 tests run in CI.
 
 Still not true: **nothing is actually deployed** — item 22 built the config, the
 guardrails and the runbook, but `fly deploy` needs an account and has not been
@@ -247,7 +265,8 @@ and the alert webhook have nothing real to point at until there is a deploy.
 **And still no real data** — which is now the only thing in the way. Item 24
 built and demonstrated the path from the workbook into the database; what is
 missing is what goes in it: the real dates (the placeholder is 2026-08-07, which
-has passed), ~80 staff against 6 example rows, ~200 dancers against 1, and
+has passed), ~80 staff against 6 example rows, ~200 dancers against 1, an email
+or phone for each of them so item 25 has somewhere to send their link, and
 Thursday, Friday and Sunday, which are almost entirely the Manual Blocks tab and
 have one example row between them.
 

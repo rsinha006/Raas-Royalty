@@ -6,7 +6,8 @@
  *   npm run codes              backfill, then summarize
  *   npm run codes -- --list    every live code with its subject
  *   npm run codes -- --list --revoked   include revoked ones
- *   npm run codes -- --check   verify coverage, exit 1 if anything is missing
+ *   npm run codes -- --check   coverage AND reachability, exit 1 on either
+ *   npm run codes -- --send-list  every message that would go out, and to where
  *   npm run codes -- --regenerate <code>
  *   npm run codes -- --revoke <code>
  */
@@ -20,6 +21,14 @@ import {
   codeForSubject,
   orphanedCodes,
 } from './lib/access-codes.js';
+import { distributionPlan } from './lib/distribution.js';
+
+/**
+ * The same rule the panel and the CSV use. Configured wins, because a list of
+ * 280 links to the wrong hostname is discovered by the recipients rather than
+ * by us — and this script has no request to fall back to.
+ */
+const base = () => (process.env.PUBLIC_BASE_URL || 'http://localhost:4000').replace(/\/+$/, '');
 
 const argv = process.argv.slice(2);
 const has = (flag) => argv.includes(flag);
@@ -101,7 +110,36 @@ if (has('--check')) {
   const dupes = live.length !== new Set(live.map((c) => `${c.subjectType}:${c.subjectId}`)).size;
   if (dupes) console.log('  DUPLICATE live codes for one subject');
 
-  process.exit(missing.length || orphans.length || dupes ? 1 : 0);
+  /**
+   * Having a code and being reachable are different failures with different
+   * fixes, so they are counted separately — but both stop somebody getting
+   * their schedule, so both fail the check. This is the gate for item 25.
+   */
+  const plan = distributionPlan(live, (c) => `${base()}/s/${c.code}`);
+  const stuck = plan.rows.filter((r) => r.blocked);
+  console.log(
+    `${plan.summary.sendable} of ${plan.summary.total} links have somewhere to go (${plan.summary.recipients} messages).`
+  );
+  stuck.forEach((r) => console.log(`  NO RECIPIENT  ${r.subjectType}  ${r.subjectLabel} — ${r.blocked}`));
+
+  process.exit(missing.length || orphans.length || dupes || stuck.length ? 1 : 0);
+}
+
+if (has('--send-list')) {
+  const plan = distributionPlan(listCodes(), (c) => `${base()}/s/${c.code}`);
+  for (const row of plan.rows) {
+    if (!row.recipients.length) {
+      console.log(`  --  ${row.subjectLabel}  (${row.blocked})`);
+      continue;
+    }
+    for (const p of row.recipients) {
+      console.log(`  ${(p.email ?? p.phone).padEnd(32)}  ${row.subjectLabel}  ${row.link}`);
+    }
+  }
+  console.log(
+    `\n  ${plan.summary.recipients} messages for ${plan.summary.sendable} links; ${plan.summary.blocked} blocked.`
+  );
+  process.exit(0);
 }
 
 const result = backfillAccessCodes({}, ctx);

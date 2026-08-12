@@ -1342,3 +1342,79 @@ person who can decide what a role should be called.
 Both are `person` selectors, so they are reached by name and carry their own
 access code like every other staff position — which is what puts them in the
 personal-code list and keeps dancers out of it, unchanged.
+
+## A person's own address is a column; the card they call is not
+
+**Date:** 2026-08-12 · **Status:** decided · supersedes part of *The access-link
+export carries no contact details* (2026-08-06)
+
+**Question.** That entry ended: "Adding real per-person contact details — an
+owner column on the roster, or a `people.email` — is the prerequisite for a
+self-sufficient export. If item 24 introduces one, revisit this." Item 24
+imported the event template, whose People and Roster tabs both carry `Phone` and
+`Email`. So: revisit.
+
+**Decision.** `people.email` and `people.phone` exist and hold that person's own
+details. `people.contact_id` is unchanged and still means the card they should
+*call*. The roster import writes the first pair from the sheet's own columns and
+creates a contact card only for a `Contact Person/Method` cell that names
+somebody else. The access-link export gains `Send To`, built from `people.email`
+and from nothing else.
+
+**Why.** The 2026-08-06 reasoning was never that addresses are unsafe — it was
+that the only contact details in the app belonged to *coordinators*, shared
+across a whole team or role, so any "Send To" built from them would mail a dozen
+private bearer tokens to one inbox while looking perfectly plausible. That
+hazard has not gone away; the fix is a second column, not a cleverer join. The
+two are now separated at the point they are read, in `rosterContacts`, rather
+than downstream where every consumer would have to know the difference.
+
+⚠️ **Item 24's first cut got this wrong, and the symptom was mild.** It built a
+contact card out of the `Phone`/`Email` columns, which made every imported
+person their own coordinator: 280 contact cards duplicating the roster, and
+every dancer shown *their own phone number* under "Your contact". Nothing
+errored. A test now asserts that no shared card's address reaches a recipient.
+
+**What it costs.** ~280 participants' email addresses and phone numbers now live
+in the database — which means they are in every off-box backup item 23 ships.
+That is a real widening of what a lost snapshot exposes, accepted because the
+alternative is distributing links by hand against a spreadsheet nobody
+reconciles. `SESSION_SECRET` is already pinned out of the database for the same
+class of reason; the backup target should be somewhere private.
+
+**Rejected: sending the mail from this app.** An event already has a mailing
+tool, and a half-built sender is one more thing to be on call for during the
+weekend. The export is a mail-merge file and stops there.
+
+## A team's link goes to its captains, and a blocked row stays in the file
+
+**Date:** 2026-08-12 · **Status:** decided
+
+**Question.** A team code has no single owner. Who receives it — every dancer on
+the team, the captains, the team's liaison?
+
+**Decision.** The captains, and only reachable ones. A team whose captains have
+no address is *blocked* rather than redirected to anybody else, and the blocked
+row stays in the export with the reason in its own column.
+
+**Why.** "Team links to captains" is the item as written, and it matches how the
+code is meant to travel: shared within the team by design, forwarded by the
+person who already runs that group chat. Sending it to all 25 dancers instead
+would work and would make the captain's role in it invisible, so nobody would
+notice when a team had no captain marked at all.
+
+The refusal is the more important half. The tempting fallbacks — the team's
+liaison, the event director, any dancer with an address — are all *plausible*,
+and every one of them hands a team's credential to somebody who was not chosen
+to hold it. A named gap that somebody fixes in the spreadsheet is strictly
+better than a link that went somewhere reasonable-looking.
+
+⚠️ **Blocked rows are not filtered out of the export.** A file with the
+unsendable rows removed looks finished, and the deadline on this item is "before
+Friday" — the list is meant to be worked through, not admired. Same reasoning as
+the import's error list.
+
+**Also decided: a phone with no email is sendable.** Some of the ~80 staff will
+be a mobile number and nothing else. Treating email as required would silently
+drop exactly those people, so `Send To Phone` is a column and the readiness
+count reports how many are text-only.

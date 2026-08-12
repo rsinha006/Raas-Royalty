@@ -38,7 +38,8 @@ function seedFixture() {
     INSERT INTO roles (id,label,selector,sort_order,active) VALUES
       ('dancer','Dancer','team',1,1),
       ('judge','Judge','person',2,1),
-      ('sponsor','Sponsor','person',3,1);
+      ('sponsor','Sponsor','person',3,1),
+      ('captain','Captain','person',9,1);
     INSERT INTO event_days (key,label,date,sort_order) VALUES ('Sat','Saturday','2026-08-08',1);
     INSERT INTO contact_cards (id,name,title,phone,email) VALUES
       ('c_liaison','Sam Okafor','Team Liaison','+1-555-0102','sam@example.org'),
@@ -46,13 +47,17 @@ function seedFixture() {
     INSERT INTO teams (id,name,liaison_contact_id) VALUES
       ('team_a','Alpha Crew','c_liaison'),
       ('team_b','Beta Crew',NULL);
-    INSERT INTO people (id,name,team_id,contact_id) VALUES
-      ('p_alice','Alice Alpha','team_a',NULL),
-      ('p_bianca','Bianca Beta','team_b',NULL),
-      ('p_judge','Jordan Judge',NULL,'c_judge'),
-      ('p_sponsor','Sasha Sponsor',NULL,NULL);
+    -- Their own addresses (item 25), which are not the same thing as the
+    -- contact cards above. Alice captains Alpha, so Alpha's team link is
+    -- addressed to her; Beta has no captain, which is a blocked row on purpose.
+    INSERT INTO people (id,name,team_id,contact_id,email,phone) VALUES
+      ('p_alice','Alice Alpha','team_a',NULL,'alice.alpha@example.edu','555-0110'),
+      ('p_bianca','Bianca Beta','team_b',NULL,'bianca.beta@example.edu',NULL),
+      ('p_judge','Jordan Judge',NULL,'c_judge','j.judge@example.com',NULL),
+      ('p_sponsor','Sasha Sponsor',NULL,NULL,NULL,NULL);
     INSERT INTO person_roles (person_id,role_id) VALUES
       ('p_alice','dancer'),
+      ('p_alice','captain'),
       ('p_bianca','dancer'),
       ('p_judge','judge'),
       ('p_sponsor','sponsor');
@@ -172,6 +177,7 @@ describe('the code endpoints are admin-only', () => {
     const attempts = [
       ['GET', '/api/admin/codes'],
       ['GET', '/api/admin/codes/export.csv'],
+      ['GET', '/api/admin/codes/distribution'],
       ['GET', '/api/admin/codes/for/team/team_a'],
       ['POST', '/api/admin/codes/backfill'],
       ['POST', '/api/admin/codes/regenerate-all'],
@@ -258,9 +264,14 @@ describe('the CSV export', () => {
       'Role',
       'Code',
       'Link',
+      'Send To',
+      'Send To Name',
+      'Send To Phone',
+      'Why',
+      'Blocked',
       'Last Used',
     ]);
-    assert.equal(rows.length, 5, 'header plus one row per live code');
+    assert.equal(rows.length, 5, 'header plus one row per recipient');
 
     const alpha = rows.find((r) => r[1] === 'Alpha Crew');
     assert.equal(alpha[0], 'team');
@@ -270,19 +281,59 @@ describe('the CSV export', () => {
     assert.equal(judge[3], 'Judge');
   });
 
+  test('a team link is addressed to its captains, not to its dancers', async () => {
+    // "Team links to captains" — the code is shared within the team by design,
+    // and the captains are who pass it on.
+    const rows = parseCsv((await asAdmin('GET', '/api/admin/codes/export.csv')).text);
+    const alpha = rows.find((r) => r[1] === 'Alpha Crew');
+    assert.equal(alpha[6], 'alice.alpha@example.edu');
+    assert.equal(alpha[7], 'Alice Alpha');
+    assert.match(alpha[9], /captain/);
+    // Bianca is on Beta and is not a captain, so her address is nowhere near
+    // Beta's link even though she is perfectly reachable.
+    assert.ok(!rows.some((r) => r[6] === 'bianca.beta@example.edu'));
+  });
+
+  test('a link nobody can be sent is still a row, and says why', async () => {
+    // Dropping it would make the file look complete. This is the list somebody
+    // works through at T-2 weeks so the fixes land before Friday.
+    const rows = parseCsv((await asAdmin('GET', '/api/admin/codes/export.csv')).text);
+    const beta = rows.find((r) => r[1] === 'Beta Crew');
+    assert.equal(beta[6], '', 'a blocked row must not carry an address');
+    assert.match(beta[10], /No captain on this team/);
+
+    const sponsor = rows.find((r) => r[1] === 'Sasha Sponsor');
+    assert.match(sponsor[10], /no email or phone/);
+  });
+
   /**
-   * `people.contact_id` is the coordinator a person should call, shared by a
-   * whole role — so a "send to" column built from it would address every exec
-   * board member's private link to the Event Director. The file must not carry
-   * one until participants' own addresses exist in the model.
+   * ⚠️ The safety property of the whole export, and the reason item 8 shipped
+   * without an address column at all.
+   *
+   * `people.contact_id` is the coordinator a person should *call*, and it is
+   * shared by a whole team or role — Sam Okafor is Alpha Crew's liaison, and
+   * Jordan's card is the Head Judge's. A "Send To" built from those addresses
+   * every exec board member's private link to one inbox, and the file looks
+   * entirely plausible on the way past. Recipients come from `people.email`
+   * and nowhere else.
    */
-  test('carries no contact details, because none of them belong to the subject', async () => {
+  test('recipients are the subjects’ own addresses, never a contact card', async () => {
     const text = (await asAdmin('GET', '/api/admin/codes/export.csv')).text;
-    for (const leaked of ['sam@example.org', 'jordan@example.org', '+1-555-0102', 'Sam Okafor']) {
-      assert.ok(!text.includes(leaked), `the export carried ${leaked}`);
+    for (const card of ['sam@example.org', 'jordan@example.org', '+1-555-0102', 'Sam Okafor']) {
+      assert.ok(!text.includes(card), `the export carried the contact card ${card}`);
     }
+    // Jordan the *person* has an address of their own, which is a different
+    // string from Jordan the *card* — and it is the one that gets used.
+    assert.ok(text.includes('j.judge@example.com'));
+  });
+
+  test('the code list still carries no addresses at all', async () => {
+    // The list is a screen; the export is a file someone runs a merge from.
+    // Only the second one has any business holding an address.
     const listed = await asAdmin('GET', '/api/admin/codes');
-    assert.ok(!listed.text.includes('sam@example.org'));
+    for (const address of ['sam@example.org', 'alice.alpha@example.edu', 'j.judge@example.com']) {
+      assert.ok(!listed.text.includes(address), `the code list carried ${address}`);
+    }
   });
 
   test('the link uses PUBLIC_BASE_URL, not the host header a proxy passed along', async () => {

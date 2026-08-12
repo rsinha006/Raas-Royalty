@@ -14,10 +14,10 @@ competition weekend. **Read this at the start of every session.**
 ## Where things stand
 
 **Done: Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13,
-14, 19, 20, 22 and 23. Items 21 and 24 are half done** — item 21's accessibility
-and responsive pass has landed and its hardware checks are open; item 24's
-engineering turned out to be real, is done, and its content half is open. Last
-updated 2026-08-11.
+14, 19, 20, 22 and 23. Items 21, 24 and 25 are half done** — item 21's
+accessibility and responsive pass has landed and its hardware checks are open;
+items 24 and 25 turned out to have real engineering in them, which is done, and
+what remains of both is the roster itself. Last updated 2026-08-12.
 
 - The viewer is **behind access codes**, enforced server-side, with the roster
   no longer enumerable. Codes are managed and exported from the admin panel.
@@ -56,14 +56,19 @@ updated 2026-08-11.
   reads; both roster tabs in one upload; four event days rather than two; and an
   import that yields nothing is refused rather than applied as an empty
   schedule. What is left of item 24 is the content and the dates.
-- **488 tests run in CI**, covering authorization negatives, timezone and DST,
+- **Every link has somebody to send it to, or says why not.** A team's link is
+  addressed to its captains and a staff member's to themselves, from their own
+  address rather than from the coordinator card they share with a dozen other
+  people — and a link that cannot be sent stays in the file naming the fix.
+- **507 tests run in CI**, covering authorization negatives, timezone and DST,
   code management, the schema migrations, broadcast scoping, the item 14
   correctness gaps, the bulk shift, the offline shell, preview fidelity,
   everything undo refuses, the announcement target, the measured colour
   contrast, the deploy gate, snapshot verification and restore, the import
   pipeline — including last year's real spreadsheets, which the importer has to
-  refuse without moving the schedule — and the event template's own tabs and
-  columns, so a renamed one is a red build.
+  refuse without moving the schedule — the event template's own tabs and
+  columns, so a renamed one is a red build, and the rule that no shared contact
+  card can ever become a link recipient.
 - **The app is usable by someone who cannot see it.** Headings, landmarks and a
   real list where there were only `div`s; every colour measured against AA
   rather than eyeballed; one keyboard tab pattern instead of four broken ones;
@@ -80,11 +85,12 @@ config, the guardrails and the runbook, but the `fly deploy` itself needs an
 account and has not been run, so item 23's backup target, heartbeat and alert
 webhook are configured-for rather than pointed at anything. And no real data.
 
-**Next up: the rest of item 24, which is now a people problem** — the real
-dates, ~80 staff and ~200 dancers into the template, and Thursday/Friday/Sunday
-onto Manual Blocks. The path from the workbook into the database is built and
-demonstrated; [docs/loading-data.md](docs/loading-data.md) is the runbook and
-the gap list. Then item 25. Phase F is built — what is left in it is running
+**Next up: the rest of items 24 and 25, which are one people problem** — the
+real dates, ~80 staff and ~200 dancers into the template with an address each,
+and Thursday/Friday/Sunday onto Manual Blocks. Both engineering halves are built
+and demonstrated; [docs/loading-data.md](docs/loading-data.md) and
+[docs/distributing-links.md](docs/distributing-links.md) are the runbooks and
+the gap list. Phase F is built — what is left in it is running
 `fly deploy` with an account, and pointing the three item 23 secrets at real
 services ([docs/ops.md](docs/ops.md)). Item 21's remaining half needs phones in
 hands, not code — run [docs/device-matrix.md](docs/device-matrix.md) before the
@@ -1410,10 +1416,67 @@ and the `everyone` doors-open announcement.
 - The gap list, with an owner column, is the second half of
   [docs/loading-data.md](docs/loading-data.md).
 
-### 25. `[ ]` Generate and distribute access links
+### 25. `[~]` Generate and distribute access links
 
 Team links to captains, individual links to staff. Send early enough that
 lost-link requests arrive before Friday rather than during.
+
+**Done 2026-08-12, except the sending itself** — `server/lib/distribution.js`,
+a `Send To` column on the export, a Ready to send card, `npm run codes --
+--send-list`, and 19 new tests (`tests/distribution.test.js` plus five in
+`admin-codes.test.js`, 507 total). Runbook:
+[docs/distributing-links.md](docs/distributing-links.md).
+
+```bash
+npm run codes -- --check       # coverage AND reachability; exits 1 on either
+npm run codes -- --send-list   # every message that would go out, and to where
+```
+
+- ⚠️ **Found and fixed first: item 24 had made every imported person their own
+  coordinator.** The roster reader built a contact card out of the People tab's
+  `Phone`/`Email` columns, so 280 cards duplicated the roster and every dancer
+  was shown *their own phone number* under "Your contact". Nothing errored.
+  Those columns are now `people.email` / `people.phone` — their own details —
+  and `contact_id` still means the card they should call. Verified on a phone:
+  a captain now sees "Lee Marchetti · Team Liaison" where she saw her own name.
+- **A team's liaison card is derived, not typed twice.** The People tab already
+  requires a `liaison` row to name its team, so each team's card comes from that
+  person. Only fills a team whose card is unset — one chosen in the panel is a
+  decision about who to put in front of 25 dancers, and a re-sync must not
+  quietly overwrite it.
+- ⚠️ **`Send To` is `people.email` and nothing else.** This is the whole safety
+  property. `contact_id` is shared — every dancer on a team points at that
+  team's liaison — so a send list built from it mails a dozen private bearer
+  tokens to one inbox and looks entirely correct on the way past. It is why item
+  8 shipped with no address column at all; `docs/decisions.md` named the
+  condition for revisiting and item 24 met it. There is a test that mails
+  nothing to a shared card.
+- **A team link goes to its captains, and a team whose captains are unreachable
+  is refused rather than redirected.** Every fallback — the liaison, the event
+  director, any dancer with an address — is plausible and every one hands a
+  team's credential to somebody who was not chosen to hold it. A named gap
+  somebody fixes in the spreadsheet is strictly better.
+- **Blocked rows stay in the export**, with the reason in its own column. A file
+  with the unsendable rows removed looks finished, and the deadline here is
+  "before Friday" — the list is meant to be worked through.
+- **A phone with no email is sendable.** Some of the ~80 staff are a mobile
+  number and nothing else; requiring email would drop exactly those people.
+- `--check` now fails on reachability as well as coverage, so the pre-event gate
+  is one command. A fresh seed reports 45 of 45 links sendable across 61
+  messages; the seed gives everyone an address so the placeholder data exercises
+  this rather than reporting every subject unreachable.
+
+**Demonstrated:** the template-shaped workbook imported through the real routes
+created **zero** contact cards where it previously created nine, put each
+person's address on them, derived both teams' liaison cards, and produced a CSV
+in which UNC's team link is addressed to Priya Raman (captain) and not to Devin
+Osei (dancer) or Lee Marchetti (liaison) — while Illini Raas is a blocked row
+naming the captain who has no address.
+
+**Still open: the sending.** Nothing here mails anything, on purpose — an event
+has a mailing tool and a half-built sender is one more thing to be on call for.
+And the file is only as good as the roster in it, so this waits on item 24's
+content half like everything else.
 
 ### 26. `[ ]` Full dress rehearsal — T-1 week
 
@@ -1449,6 +1512,8 @@ for "I lost my link" at the check-in desk.
 | Dancer schedules have no source and never get authored | Half closed — the pipelines on Sequences + Slot Times are the mechanism, and Saturday is built from them. The steps, the anchors, and all of Thu/Fri/Sun are still content with no named owner | 24 |
 | ~~The app cannot read the workbook logistics actually fills in~~ | Closed — three tabs read by name, both roster tabs in one upload, four event days, and 47 tests including the template's own tabs and columns | 24 |
 | An import silently empties the schedule | Closed — refused on "nothing importable came out" rather than on "rows failed", which is the case a formulas-only Export tab produced | 24 |
+| ~~A mail merge sends a dozen people's private links to one inbox~~ | Closed — recipients come from `people.email` and never from a contact card, which is shared by a whole team; a test mails nothing to a shared card | 25 |
+| Links go out and nobody opens them | Half closed — the panel counts never-used, and `--check` fails when a link has no recipient. Nothing confirms delivery, and nothing sends: the merge is somebody's mailing tool | 25, 28 |
 | Airport runs and the day grids never reach a phone | Open — `Export` reads from neither, so both look complete and change nothing. Documented in `docs/loading-data.md`; nothing in the workbook says so | 24, 26 |
 | ~~Late schema change forces rework~~ | Closed — model confirmed against past-year data, and applied in item 13 with a migration that runs on boot | 2, 3, 13 |
 | Real roster still not in hand | A people problem, not an engineering one — it was due at T-6 and is the likeliest thing to slip past the rehearsal. The loading path is now built and demonstrated, so this is the only thing between here and a real schedule | 24 |
@@ -1475,7 +1540,7 @@ the two that actually catch problems.
 | T-4 | Phase C (reliability core) — items 9 ✅, 10 ✅, 11 ✅, 13 ✅ and 14 ✅ done; only item 12 remains, and it waits on the template. |
 | T-3 | Phase D + E (admin tooling, tests, load test) — Phase D ✅, item 19 ✅ and item 20 ✅ done early; item 21's audit ✅. |
 | T-2 | Phase F (deploy, ops) — item 22 ✅ configured and item 23 ✅ built; both need the deploy actually run, and item 23's three secrets pointed at real services. Plus item 21's device checks on real phones. |
-| T-1 | Items 24–26. Item 24's engineering ✅ done early; its content half and the dates are the gate. Dress rehearsal. |
+| T-1 | Items 24–26. Items 24 ✅ and 25 ✅ engineering done early; the roster and the dates are the gate for both. Dress rehearsal. |
 | Event week | Items 27–28. Freeze Wednesday. |
 | After | Retro. Export the edit log to see what actually changed and how often. |
 

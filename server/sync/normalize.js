@@ -459,20 +459,46 @@ function rosterName(r) {
 }
 
 /**
- * The People tab has its own Phone and Email columns rather than the CSV
- * template's single "Contact Person/Method" cell. Prefer the combined cell when
- * it is there — it can name someone *else*, which is the whole point of a
- * dancer's card pointing at their liaison — and otherwise build the card from
- * this person's own two columns.
+ * Split a roster row's two very different kinds of contact detail.
+ *
+ * ⚠️ These are not the same thing and conflating them is a real bug, which is
+ * why they are separated here rather than downstream:
+ *
+ *   - **`self`** — this person's own phone and email, off the People and Roster
+ *     tabs' `Phone` / `Email` columns. Used to *send them their access link*.
+ *   - **`contact`** — the card they should *call*, which names somebody else:
+ *     a dancer's team liaison, a judge's coordinator. This is what the viewer
+ *     shows under "Your contact", and it is shared across many people.
+ *
+ * Item 24's first cut built a card out of the `Phone`/`Email` columns, which
+ * made every imported person their own coordinator: 280 contact cards
+ * duplicating the roster, every dancer shown their own number under "Your
+ * contact", and no liaison reachable from any phone. The `Contact
+ * Person/Method` cell is still read for the CSV template, but a bare method
+ * with no name in it is that person's own details — so it becomes `self`, not
+ * a card titled after them.
  */
-function rosterContact(r, name) {
-  const combined = pick(r, ['Contact Person/Method', 'Contact', 'Contact Method']);
-  if (String(combined ?? '').trim()) return parseContactCell(combined, name);
+function rosterContacts(r, name) {
+  const self = {
+    phone: normalizePhone(pick(r, ['Phone', 'Phone Number', 'Mobile', 'Cell'])),
+    email: clean(pick(r, ['Email', 'Email Address'])).toLowerCase() || null,
+  };
 
-  const phone = normalizePhone(pick(r, ['Phone', 'Phone Number', 'Mobile', 'Cell']));
-  const email = clean(pick(r, ['Email', 'Email Address'])) || null;
-  if (!phone && !email) return null;
-  return { name, phone, email };
+  const combined = pick(r, ['Contact Person/Method', 'Contact', 'Contact Method']);
+  const parsed = String(combined ?? '').trim() ? parseContactCell(combined, name) : null;
+
+  if (!parsed) return { self, contact: null };
+  if (norm(parsed.name) === norm(name)) {
+    // A bare method: their own details, written in the other column.
+    return {
+      self: {
+        phone: self.phone || normalizePhone(parsed.phone),
+        email: self.email || clean(parsed.email).toLowerCase() || null,
+      },
+      contact: null,
+    };
+  }
+  return { self, contact: parsed };
 }
 
 /**
@@ -537,6 +563,7 @@ export function normalizeRosterRows(rawRows, opts = {}) {
       continue;
     }
 
+    const { self, contact } = rosterContacts(r, name);
     rows.push({
       name,
       roleId: role.id,
@@ -544,7 +571,11 @@ export function normalizeRosterRows(rawRows, opts = {}) {
       roleIds: captainRole && captainRole.id !== role.id ? [role.id, captainRole.id] : [role.id],
       isCaptain: Boolean(captainRole),
       teamName: team || null,
-      contact: rosterContact(r, name),
+      // Their own, for sending them their link (item 25).
+      email: self.email,
+      phone: self.phone,
+      // Somebody else's, for them to call.
+      contact,
       __row: lineNo,
       __sheet: sheet,
     });

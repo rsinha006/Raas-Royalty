@@ -86,11 +86,19 @@ from the same places they did last year:
   stripped. Two names differing only by an invisible character are two different
   people to every lookup in this app, and the next import creates the second one.
 
+⚠️ **`Phone` and `Email` are that person's own** and are stored on them, not as
+a contact card. The card is who they should *call* — a dancer's team liaison —
+and it is shared by everyone who calls the same person. Those two are separate
+columns on purpose: item 25 sends each person their link using the first, and
+using the second would mail a whole team's private links to one inbox. Each
+team's liaison card is derived from the `liaison` rows on the People tab, which
+is why a liaison row must name its team.
+
 Then check nobody is unreachable:
 
 ```bash
-npm run codes -- --check   # exits 1 if any subject has no live code
-npm run codes -- --list
+npm run codes -- --check       # coverage AND reachability; exits 1 on either
+npm run codes -- --send-list   # every message that would go out, and to where
 ```
 
 New teams and new staff arrive without codes — issuing them is item 25. Dancers
@@ -142,6 +150,7 @@ owner** rather than a background task.
 | --- | --- | --- |
 | **People tab** | 6 example rows | logistics |
 | **Roster tab** | 1 example row — ~200 dancers to come, per team | team captains, collated by logistics |
+| **An email or phone for every staff member and every captain** | The columns are there and empty. Without one, that person's link has nowhere to go — and a team's link needs a reachable *captain*, not just a reachable dancer | logistics |
 | **Manual Blocks** | 1 example row. Thursday, Friday and Sunday are almost entirely this tab: board duties, registration, airport runs, checkout | logistics |
 | **Airport runs** | The Airport tab has two example rows and reaches nothing — see above | logistics |
 | **Windows** | 5 meal windows, plausible, unconfirmed | logistics |
@@ -160,7 +169,8 @@ still has to decide what the steps and the anchors actually are.
 
 ## Checks before you call it loaded
 
-1. `npm run codes -- --check` exits 0.
+1. `npm run codes -- --check` exits 0 — every subject has a link, and every
+   link has somebody to send it to.
 2. The import preview shows zero errors, on both tabs.
 3. **Admin → View as** on one dancer, one captain, one liaison and one judge —
    each sees what they should, and the captain sees the captain blocks their

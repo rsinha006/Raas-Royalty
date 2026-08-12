@@ -24,6 +24,7 @@ import {
   subjectExists,
 } from '../lib/access-codes.js';
 import { editorName } from '../lib/auth.js';
+import { distributionPlan } from '../lib/distribution.js';
 
 const csvEscape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
 
@@ -81,34 +82,56 @@ export function adminCodesRouter() {
   });
 
   /**
-   * The mail-merge file: one row per live code, with the link already built.
+   * Who each link goes to, and why. The screen item 25 is run from.
    *
-   * No email column, because no participant's own address exists anywhere in
-   * this data model — `people.contact_id` is the coordinator they should call.
-   * The merge therefore joins this file to whatever list logistics actually
-   * mails from, on the subject name. Inventing a "send to" column out of the
-   * contact cards would silently address a dozen private links to one inbox.
+   * Separate from the code list because it answers a different question: not
+   * "does everyone have a link" but "can everyone be *sent* one", which is the
+   * one with a deadline on it. A blocked row names what to fix.
+   */
+  router.get('/distribution', (req, res) => {
+    const base = publicBaseUrl(req);
+    res.json(distributionPlan(listCodes(), (c) => linkFor(base, c.code)));
+  });
+
+  /**
+   * The mail-merge file: one row per live code, with the link already built and
+   * the address to send it to.
    *
-   * Live codes only, and orphans excluded: a dead or unreachable link in front
-   * of whoever runs the merge is worse than a missing row, which gets noticed.
+   * ⚠️ **`Send To` is `people.email`, never a contact card.** Item 8 shipped
+   * this file without an address column precisely because the only contact
+   * details in the app then were `people.contact_id` — the coordinator someone
+   * should *call*, shared across a whole team or role. A Send To built from
+   * that mails a dozen private links to one inbox, and the column looks
+   * plausible on inspection. Item 24 imported real per-person details, which is
+   * the condition `docs/decisions.md` named for adding this.
+   *
+   * One row per recipient rather than per code, so a team link addressed to
+   * three captains is three rows and a merge needs no splitting step. Rows that
+   * cannot be sent are still here, with `Send To` empty and `Blocked` saying
+   * why — dropping them would make the file look complete.
+   *
+   * Live codes only, and orphans excluded: a dead link in front of whoever runs
+   * the merge is worse than a missing row, which gets noticed.
    */
   router.get('/export.csv', (req, res) => {
     const base = publicBaseUrl(req);
     const type = req.query.type;
-    const codes = listCodes()
-      .filter((c) => !c.orphaned)
-      .filter((c) => !type || c.subjectType === type);
+    const plan = distributionPlan(listCodes(), (c) => linkFor(base, c.code));
+    const wanted = plan.rows.filter((r) => !type || r.subjectType === type);
 
-    const header = ['Subject Type', 'Subject', 'Team', 'Role', 'Code', 'Link', 'Last Used'];
-    const rows = codes.map((c) => [
-      c.subjectType,
-      c.subjectLabel,
-      c.teamName,
-      c.roleLabel,
-      c.code,
-      linkFor(base, c.code),
-      c.lastUsedAt ?? 'never',
-    ]);
+    const header = [
+      'Subject Type', 'Subject', 'Team', 'Role', 'Code', 'Link',
+      'Send To', 'Send To Name', 'Send To Phone', 'Why', 'Blocked', 'Last Used',
+    ];
+    const rows = wanted.flatMap((r) => {
+      const base = [r.subjectType, r.subjectLabel, r.teamName, r.roleLabel, r.code, r.link];
+      if (!r.recipients.length) {
+        return [[...base, '', '', '', '', r.blocked ?? '', r.lastUsedAt ?? 'never']];
+      }
+      return r.recipients.map((p) => [
+        ...base, p.email ?? '', p.name, p.phone ?? '', p.why, '', r.lastUsedAt ?? 'never',
+      ]);
+    });
 
     const body = [header, ...rows].map((r) => r.map(csvEscape).join(',')).join('\n');
     const stamp = new Date().toISOString().slice(0, 10);

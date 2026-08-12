@@ -247,6 +247,14 @@ export function computeRosterDiff(rows, { removeMissing = false } = {}) {
         changes.push(`contact ${prevContact?.name ?? 'none'} → ${row.contact.name}`);
       }
     }
+    // Their own address. Without this a corrected email reads as "unchanged"
+    // and is never written, so the link goes to the old one — the failure is
+    // that nothing happens, which nobody notices until they ask for a resend.
+    for (const field of ['email', 'phone']) {
+      if (row[field] && norm(prev[field]) !== norm(row[field])) {
+        changes.push(`${field} ${prev[field] || 'none'} → ${row[field]}`);
+      }
+    }
     if (changes.length) updatePeople.push({ id: prev.id, row, changes, label: row.name });
     else unchanged++;
   }
@@ -273,6 +281,56 @@ export function computeRosterDiff(rows, { removeMissing = false } = {}) {
         removePeople.length >
       0,
   };
+}
+
+/**
+ * Give every team a liaison card to show under "Your contact".
+ *
+ * A dancer's contact resolves as `people.contact_id` → their team's
+ * `liaison_contact_id` → the event-wide fallback. The roster tabs give dancers
+ * no coordinator of their own, so without this every one of them falls all the
+ * way through to the event director — who is not who you ask about a warm-up.
+ *
+ * The liaisons are already in the data: the People tab's own instruction is
+ * that a `liaison` row must name the team it belongs to. So the card is derived
+ * from that person rather than typed a second time.
+ *
+ * ⚠️ Only fills a team whose liaison card is **unset**. A card chosen in the
+ * panel is a decision someone made about who to put in front of 25 dancers, and
+ * a re-sync must not quietly overwrite it. Deterministic when a team has
+ * several liaisons — first by name, so a re-run does not shuffle it.
+ */
+function linkTeamLiaisons() {
+  const teams = db
+    .prepare('SELECT id FROM teams WHERE liaison_contact_id IS NULL')
+    .all();
+  if (!teams.length) return;
+
+  const liaisonFor = db.prepare(
+    `SELECT p.name, p.email, p.phone
+       FROM people p
+       JOIN person_roles pr ON pr.person_id = p.id
+      WHERE p.team_id = ? AND pr.role_id = 'liaison'
+      ORDER BY p.name
+      LIMIT 1`
+  );
+  const findCard = db.prepare('SELECT id FROM contact_cards WHERE lower(name) = lower(?)');
+  const insertCard = db.prepare(
+    'INSERT INTO contact_cards (id, name, title, phone, email) VALUES (?, ?, ?, ?, ?)'
+  );
+  const setLiaison = db.prepare('UPDATE teams SET liaison_contact_id = ? WHERE id = ?');
+
+  for (const team of teams) {
+    const liaison = liaisonFor.get(team.id);
+    if (!liaison) continue;
+    let card = findCard.get(liaison.name);
+    if (!card) {
+      const id = newId('con');
+      insertCard.run(id, liaison.name, 'Team Liaison', liaison.phone, liaison.email);
+      card = { id };
+    }
+    setLiaison.run(card.id, team.id);
+  }
 }
 
 export function applyRosterDiff(diff, ctxIn) {
@@ -315,19 +373,40 @@ export function applyRosterDiff(diff, ctxIn) {
     for (const { row } of diff.createPeople) {
       const id = newId('per');
       db.prepare(
-        'INSERT INTO people (id, name, team_id, contact_id) VALUES (?, ?, ?, ?)'
-      ).run(id, row.name, row.teamName ? teamId(row.teamName) : null, contactId(row.contact));
+        'INSERT INTO people (id, name, team_id, contact_id, email, phone) VALUES (?, ?, ?, ?, ?, ?)'
+      ).run(
+        id,
+        row.name,
+        row.teamName ? teamId(row.teamName) : null,
+        contactId(row.contact),
+        row.email ?? null,
+        row.phone ?? null
+      );
       setRoles(id, row);
     }
     for (const item of diff.updatePeople) {
-      db.prepare('UPDATE people SET team_id = ?, contact_id = COALESCE(?, contact_id) WHERE id = ?').run(
+      // `COALESCE` on all three: a sheet that leaves a cell blank is not saying
+      // "delete what you have", it is saying nothing. Clearing an address is
+      // done in the panel, where it is a deliberate act.
+      db.prepare(
+        `UPDATE people
+            SET team_id = ?,
+                contact_id = COALESCE(?, contact_id),
+                email = COALESCE(?, email),
+                phone = COALESCE(?, phone)
+          WHERE id = ?`
+      ).run(
         item.row.teamName ? teamId(item.row.teamName) : null,
         contactId(item.row.contact),
+        item.row.email ?? null,
+        item.row.phone ?? null,
         item.id
       );
       // Rewritten every time, so removing a `Captain?` mark actually demotes.
       setRoles(item.id, item.row);
     }
+
+    linkTeamLiaisons();
     for (const item of diff.deletePeople) {
       // Their blocks go with them, for the same reason the admin panel's delete
       // refuses to leave them: a block targeting a person who is no longer on

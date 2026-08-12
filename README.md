@@ -31,7 +31,13 @@ Codes are managed in the panel's **Access codes** tab, or from the CLI:
 
 ```bash
 npm run codes -- --list
+npm run codes -- --check       # coverage AND reachability; exits 1 on either
+npm run codes -- --send-list   # every link and the address it goes to
 ```
+
+Team links go to that team's captains, staff links to the person themselves,
+from their own address rather than from the coordinator card they share — see
+[docs/distributing-links.md](docs/distributing-links.md).
 
 The event's dates live in `event_days` and move together:
 
@@ -43,7 +49,7 @@ npm run days -- --friday 2027-02-12   # pin the whole weekend from one date
 ### Tests
 
 ```bash
-npm test        # 488 tests, no build and no server needed
+npm test        # 507 tests, no build and no server needed
 npm run ci      # what CI runs: the client typecheck and build, then the tests
 ```
 

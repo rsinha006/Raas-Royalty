@@ -8,6 +8,7 @@ import {
   logEdit,
   updateBlock,
 } from '../lib/mutations.js';
+import { rosterIdentity } from './normalize.js';
 
 /**
  * Diffing is deliberately separated from applying: the admin preview step runs
@@ -199,7 +200,23 @@ export function computeRosterDiff(rows, { removeMissing = false } = {}) {
     heldRoles.get(r.person_id).add(r.role_id);
   }
 
-  const peopleByName = new Map(people.map((p) => [`${norm(p.name)}|${p.role_id}`, p]));
+  /**
+   * Identity → every person holding it, not the last one to be read.
+   *
+   * ⚠️ This was a plain `Map` of identity → person, which silently kept
+   * whichever row SQLite returned last when two people shared a name and a
+   * role. Both sheet rows then resolved to that one person: the updates were
+   * applied one over the other, and the second person was never written to
+   * again by any import. `normalizeRosterRows` refuses same-identity rows now,
+   * but a database can already be in that state — the first import that hit
+   * this created the pair — so the ambiguity has to be answerable here too.
+   */
+  const peopleByName = new Map();
+  for (const p of people) {
+    const id = rosterIdentity({ name: p.name, roleId: p.role_id });
+    if (!peopleByName.has(id)) peopleByName.set(id, []);
+    peopleByName.get(id).push(p);
+  }
   const teamsByName = new Map(teams.map((t) => [norm(t.name), t]));
   const contactsByName = new Map(contacts.map((c) => [norm(c.name), c]));
 
@@ -207,12 +224,40 @@ export function computeRosterDiff(rows, { removeMissing = false } = {}) {
   const createContacts = [];
   const createPeople = [];
   const updatePeople = [];
+  const errors = [];
   let unchanged = 0;
   const seenPeople = new Set();
   const pendingTeams = new Set();
   const pendingContacts = new Set();
 
   for (const row of rows) {
+    const key = rosterIdentity(row);
+    seenPeople.add(key);
+    const matches = peopleByName.get(key) ?? [];
+    if (matches.length > 1) {
+      // Refused rather than resolved, for the same reason the sheet-level check
+      // refuses: picking one writes this row's email and phone onto a coin
+      // flip, and an access link is what gets sent to the address it picks.
+      errors.push({
+        row: row.__row ?? null,
+        sheet: row.__sheet ?? null,
+        message:
+          `${matches.length} people on the roster are already called "${row.name}" ` +
+          `and hold ${row.roleLabel} — this row cannot be matched to one of them. ` +
+          'Rename them in the Roster tab of the admin panel so they are ' +
+          'distinguishable, then import again.',
+      });
+      continue;
+    }
+
+    /**
+     * ⚠️ Below the refusal, never above it. A row the importer declined to
+     * apply must contribute *nothing* — with these above the check, an
+     * ambiguous row still created its team and its contact card, so a refusal
+     * left behind a team with no members (which item 5's backfill then mints a
+     * live access code for) and a card nothing points at. It also made
+     * `hasChanges` true, which is what enables the Apply button.
+     */
     if (row.teamName && !teamsByName.has(norm(row.teamName)) && !pendingTeams.has(norm(row.teamName))) {
       pendingTeams.add(norm(row.teamName));
       createTeams.push({ name: row.teamName });
@@ -222,9 +267,7 @@ export function computeRosterDiff(rows, { removeMissing = false } = {}) {
       createContacts.push(row.contact);
     }
 
-    const key = `${norm(row.name)}|${row.roleId}`;
-    seenPeople.add(key);
-    const prev = peopleByName.get(key);
+    const prev = matches[0];
     if (!prev) {
       createPeople.push({
         row,
@@ -259,9 +302,16 @@ export function computeRosterDiff(rows, { removeMissing = false } = {}) {
     else unchanged++;
   }
 
+  /**
+   * ⚠️ A refused row still counts as *seen*, which is why `seenPeople.add` sits
+   * above the ambiguity check rather than below it. Both people behind an
+   * ambiguous name are named in the sheet; treating the refusal as "absent"
+   * would have `removeMissing` delete the pair — turning a row the importer
+   * declined to touch into two people removed from the event.
+   */
   const removePeople = removeMissing
     ? people
-        .filter((p) => !seenPeople.has(`${norm(p.name)}|${p.role_id}`))
+        .filter((p) => !seenPeople.has(rosterIdentity({ name: p.name, roleId: p.role_id })))
         .map((p) => ({ id: p.id, label: `${p.name} (${p.role_id})` }))
     : [];
 
@@ -271,6 +321,7 @@ export function computeRosterDiff(rows, { removeMissing = false } = {}) {
     createPeople,
     updatePeople,
     deletePeople: removePeople,
+    errors,
     unchanged,
     total: rows.length,
     hasChanges:

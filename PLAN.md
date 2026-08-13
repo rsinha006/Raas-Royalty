@@ -14,7 +14,9 @@ competition weekend. **Read this at the start of every session.**
 ## Where things stand
 
 **Done: Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13,
-14, 19, 20, 22, 23, 27 and 28. Items 21, 24, 25 and 26 are half done** — item 21's
+14, 19, 20, 22, 23, 27 and 28. Items 12, 21, 24, 25 and 26 are half done** — item
+12's name collisions are closed and its meridiem gap is the only messy-input
+item left; item 21's
 accessibility and responsive pass has landed and its hardware checks are open;
 items 24 and 25 turned out to have real engineering in them, which is done, and
 what remains of both is the roster itself; item 26's tooling and script are
@@ -82,7 +84,7 @@ Last updated 2026-08-13.
   own release if the *build* stamped it — there is no repository inside the image
   — so a plain `fly deploy` produces a machine indistinguishable from any other,
   which `preflight` and the Ops panel now say out loud.
-- **602 tests run in CI**, covering authorization negatives, timezone and DST,
+- **618 tests run in CI**, covering authorization negatives, timezone and DST,
   code management, the schema migrations, broadcast scoping, the item 14
   correctness gaps, the bulk shift, the offline shell, preview fidelity,
   everything undo refuses, the announcement target, the measured colour
@@ -91,10 +93,12 @@ Last updated 2026-08-13.
   pipeline — including last year's real spreadsheets, which the importer has to
   refuse without moving the schedule — the event template's own tabs and
   columns, so a renamed one is a red build, the rule that no shared contact
-  card can ever become a link recipient, and — new — the per-subject comparison
-  behind "is this phone up to date", every way the readiness gate refuses, and —
-  new — every way the freeze gate does, including a release identity that must
-  never fall back to a version string that has never changed.
+  card can ever become a link recipient, the per-subject comparison
+  behind "is this phone up to date", every way the readiness gate refuses, every
+  way the freeze gate does, including a release identity that must
+  never fall back to a version string that has never changed, and — new — every
+  way the roster importer refuses two rows it cannot tell apart, including the
+  re-sync that silently froze one of two people sharing a name.
 - **The app is usable by someone who cannot see it.** Headings, landmarks and a
   real list where there were only `div`s; every colour measured against AA
   rather than eyeballed; one keyboard tab pattern instead of four broken ones;
@@ -678,14 +682,71 @@ template.
 to require them: `Export`, `People` and `Roster` are read by name, the People
 tab's `Type` vocabulary maps onto roles, `First Name` + `Last Name` join, the
 food-restriction mark comes off, phones normalize and invisible characters are
-stripped. What is left of this item is the *rest* of the messy-input list
-against a workbook nobody has filled in yet — meridiem inherited from the end
-time to the start, and within-team name collisions — neither of which can be
-built honestly against six example rows. Both have tests today saying they are
-known gaps rather than surprises.
+stripped.
 
-⚠️ The remaining half is genuinely blocked on content, not on the template's
-shape. See [docs/loading-data.md](docs/loading-data.md).
+**Name collisions closed 2026-08-13** — `rosterIdentity()` in
+`server/sync/normalize.js`, an ambiguity refusal in `computeRosterDiff`, and 16
+new tests (`tests/import-pipeline.test.js`, 618 total). Demonstrated through the
+real routes on the real dev database, both halves.
+
+```bash
+npm test
+```
+
+- ⚠️ **The bug was silent and only appeared on the *second* import.** A person
+  is keyed on name + display role, which is not unique — item 3 settled that
+  `Ashka Patel` is two people sharing a name, and ~200 dancers is where that
+  lives. `computeRosterDiff` held a `Map` of identity → person, keeping whichever
+  row SQLite returned last: the first import created both people and looked
+  right, and every re-sync after it wrote *both* sheet rows onto that one
+  person. The other was never updated by any import again — corrected email, new
+  team, captain promotion, all reported as applied and none of them landing, on
+  somebody still on the roster holding a live access code. No error, no wrong
+  count.
+- **Both rows are refused, never first-wins.** "Keep the first" guesses which
+  row is the real person, and the two rows differ in exactly the fields —
+  `email`, `phone` — that decide whose phone gets whose link. Item 25's safety
+  property is that a link goes to `people.email` and nowhere else; a coin flip
+  puts the right link on the wrong address and looks correct doing it.
+- **Checked twice, because it has two sources.** Two rows in one upload are
+  caught by the sheet reader — per tab, then again across the whole upload,
+  since a dancer who also holds a staff job gets typed onto People *and* Roster
+  and no per-sheet pass can see that. A row matching two people **already in the
+  database** is caught in the diff, because a database can already be in that
+  state: the first import that hit this is what created the pair. Both land in
+  the same `errors` list the preview already renders, so neither is discovered
+  after Apply.
+- ⚠️ **A refused row still counts as *seen*.** `seenPeople.add` sits above the
+  ambiguity check, because both people behind an ambiguous name are named in the
+  sheet — treating the refusal as "absent" would have `removeMissing` delete the
+  pair, turning a row the importer declined to touch into two people removed
+  from the event. There is a test.
+- ⚠️ **A refused row contributes nothing, and `/code-review` is what found that
+  it did.** The team and contact-card creation sat *above* the new refusal, so
+  an ambiguous row still created a team with no members — which item 5's
+  backfill mints a live access code for — and a card nothing points at. Worse,
+  those made `hasChanges` true, which is what enables the Apply button.
+- ⚠️ **The commit gate is "how many rows resolved to a person", never
+  `hasChanges`.** `hasChanges` counts `deletePeople`, so under `removeMissing` a
+  file whose every row was refused read as "changes to apply" and the changes
+  were deletions: an upload naming only ambiguous people, with "treat this as
+  the complete roster" ticked, would have pruned everybody it did not name.
+  Same shape as item 24's schedule refusal — the test is that nothing
+  importable came out, never that some rows failed. Both are pinned by tests
+  that fail against the version this paragraph describes.
+- **The refusal is not a dead end, which is the part worth checking.** It names
+  both rows and asks for distinguishable names; renaming one in the panel makes
+  the same file import cleanly onto the right person. Demonstrated. An ID column
+  and a `people.source_key` migration were rejected — see
+  [docs/decisions.md](docs/decisions.md) — because they buy the ability to keep
+  two identical names on a roster, which is a thing worth not having.
+
+⚠️ **Still open: meridiem inherited from the end time to the start.** That one
+*is* blocked on content — it is a property of the wall-chart day grids, and the
+template's `Export` tab emits calculated times rather than `"5:00 – 7:00 PM"`
+text, so it cannot be built honestly until a filled-in workbook says whether it
+still happens. It has a test today saying it is a known gap.
+See [docs/loading-data.md](docs/loading-data.md).
 
 ### 13. `[x]` Apply model changes from item 3
 
@@ -1769,6 +1830,7 @@ the 45 live codes.
 | A rehearsal against placeholder data passes and proves nothing | Closed — the gate refuses on dates that have already happened, a schedule made of seed rows, and an empty event day, and names what to fix. It is the same report in the panel and on the command line | 26 |
 | A phone silently stops updating and nobody can tell | Closed for anyone watching the panel — each viewer reports the version it is rendering and `Ops → Phones connected` compares it against that person's own targets. ⚠️ A phone with the app *closed* does not appear at all, which is normal and is why the count is read against the room rather than against the roster | 26 |
 | ~~Late schema change forces rework~~ | Closed — model confirmed against past-year data, and applied in item 13 with a migration that runs on boot | 2, 3, 13 |
+| Two people who share a name silently become one | Closed — the importer refuses both rows rather than picking one, and refuses a row matching two people already in the database. ⚠️ The failure only ever appeared on the *second* import: the first created the pair, and every re-sync after it wrote both rows onto whichever one the lookup kept, freezing the other permanently while it still held a live access code | 12 |
 | Real roster still not in hand | A people problem, not an engineering one — it was due at T-6 and is the likeliest thing to slip past the rehearsal. The loading path is now built and demonstrated, so this is the only thing between here and a real schedule | 24 |
 | The event dates are still a placeholder, and it is now in the past | `npm run days` moves the whole weekend from one date and refuses a wrong weekday. The mechanism exists; the number is the event director's | 24 |
 | ~~Thundering herd on every change~~ | Closed — one team's edit wakes 66 of 600 phones, and even an announcement to all 600 settles in ~140ms with no errors | 11, 20 |

@@ -1723,3 +1723,85 @@ have looked like more coverage and been strictly less.
 event week; there is no branch protection and no lockout. The freeze is a
 recorded intent plus the ability to notice it has been departed from — which is
 the honest limit for a project one person deploys.
+
+---
+
+## Two roster rows the importer cannot tell apart are refused, not resolved
+
+**Decided 2026-08-13** (item 12).
+
+A person is identified across imports by their **name plus their display role**
+— `rosterIdentity()` in `server/sync/normalize.js`, and the only definition of
+it. Team is deliberately not part of the key: a dancer moving between teams has
+to read as an update, and keying on team would make a transfer a delete plus a
+create, which under `removeMissing` takes their access code and their airport
+pickup with it.
+
+That key is not unique on a real roster. The event director confirmed in item 3
+that `Ashka Patel` is two people sharing a name, and ~200 dancers is where that
+lives. **The importer now refuses both rows rather than picking one.**
+
+**The failure it replaces was silent and appeared only on the second import.**
+`computeRosterDiff` built a `Map` of identity → person, which keeps whichever
+row SQLite returned last. The first import created two people correctly and
+looked fine. Every re-sync after it resolved *both* sheet rows to that one
+person and applied their updates one over the other, so the second person was
+never written to again by any import — their corrected email, their new team,
+their captain promotion all reported as applied and none of them landed, on
+somebody still on the roster and still holding a live access code. Nothing
+errored, and no count was wrong.
+
+**Both rows are refused, never the first-wins.** "Keep the first" is a guess
+about which row is the real person, and the two rows differ in exactly the
+fields — `email`, `phone` — that decide whose phone receives whose access link.
+Item 25's whole safety property is that a link goes to `people.email` and
+nowhere else; resolving this by coin flip puts the right link on the wrong
+address and looks entirely correct doing it.
+
+**The fix is in the spreadsheet, and it is the right fix.** The refusal names
+both rows and their tabs and asks for distinguishable names. Twenty-five
+teammates reading a call sheet cannot tell two identical `Ashka Patel` rows
+apart either, and neither can whoever is holding the desk index when one of them
+loses their link — so the disambiguation belongs in the roster, not in a
+synthetic key. Same reasoning as item 25's blocked rows: a named gap somebody
+fixes in the sheet is strictly better than a plausible guess.
+
+**Rejected: an ID column on the roster tabs**, mirroring the schedule's
+`ID`/`Block ID`. It would work, but it needs a `people.source_key` column and a
+migration to survive a re-sync, and it buys the ability to keep two identical
+names on the roster — which is a thing worth *not* having. Revisit only if
+logistics comes back with two people who genuinely cannot be distinguished by
+name.
+
+**Rejected: the schedule pipeline's `#2` suffix.** `normalizeScheduleRows`
+disambiguates repeated source keys by occurrence order. For blocks that is
+fine. For people it means reordering the sheet swaps two people's identities,
+and with them their access links — order-dependent identity is exactly what a
+bearer token must not have.
+
+**The ambiguity is checked twice, because it has two sources.** Two rows in one
+upload are caught by the sheet reader (per tab, then again across the whole
+upload — a dancer who also holds a staff job gets typed onto both People and
+Roster, which no per-sheet pass can see). A sheet row matching two people
+*already in the database* is caught in `computeRosterDiff`, because a database
+can already be in that state: the first import that hit this bug is what created
+the pair. Both refusals surface in the same `errors` list the preview already
+renders, so neither is discovered after Apply.
+
+⚠️ **A refused row still counts as seen.** `seenPeople.add` sits above the
+ambiguity check in `computeRosterDiff` on purpose: both people behind an
+ambiguous name are named in the sheet, and treating the refusal as "absent"
+would have `removeMissing` delete the pair — turning a row the importer declined
+to touch into two people removed from the event. There is a test.
+
+**A refused row contributes nothing, and the commit gate counts people.** Both
+found by `/code-review` on the change itself, and both were the failure this
+feature exists to prevent — an import that reports a refusal and writes anyway.
+The team and contact-card creation sat above the ambiguity check, so a refused
+row still created a team with no members (item 5's backfill then mints it a live
+access code) and an orphan contact card. And the commit route gated on
+`diff.hasChanges`, which counts `deletePeople` — so under `removeMissing` a file
+whose every row was refused read as "changes to apply" and those changes were
+the deletion of everybody the file did not name. The gate is now the number of
+rows that resolved to a person, which is item 24's rule again: the test is that
+nothing importable came out, never that some rows failed.

@@ -502,6 +502,81 @@ function rosterContacts(r, name) {
 }
 
 /**
+ * What makes two roster rows the same person: their name and their display
+ * role. **This is the only definition** — `computeRosterDiff` imports it rather
+ * than rebuilding the string, because a diff that matched on one rule while the
+ * duplicate check refused on another would let through exactly the rows the
+ * check exists to catch.
+ *
+ * ⚠️ Team is deliberately *not* in it. A dancer moving between teams has to read
+ * as an update; keying on team would make a transfer a delete plus a create,
+ * which under `removeMissing` takes their access code and their airport pickup
+ * with it. That is also why this is not a sufficient identity on a real roster,
+ * and why `dedupeByIdentity` exists.
+ *
+ * @param {{name: string, roleId: string}} row a normalized row, or any
+ *   `{name, roleId}` — `computeRosterDiff` passes existing people through it too.
+ */
+export function rosterIdentity(row) {
+  return `${norm(row.name)}|${row.roleId}`;
+}
+
+/**
+ * Refuse rows that name the same person twice, rather than picking one.
+ *
+ * ⚠️ Two rows sharing a name and a role are either one person entered twice or
+ * two people who share a name — and **nothing in the file distinguishes them**.
+ * Applying them anyway is the silent failure this exists to stop: the first
+ * import creates two people, and every re-sync after it writes *both* rows onto
+ * whichever one the lookup happened to keep, so the other is never updated
+ * again. Their corrected email, their new team, their captain promotion all
+ * report as applied and none of them land, on a person who is still on the
+ * roster and still has a live access code.
+ *
+ * Both rows are refused, not the second one — "keep the first" is a guess about
+ * which is real, and the two rows differ in exactly the fields (email, phone)
+ * that decide whose phone gets whose access link.
+ *
+ * The fix is in the sheet and it is the right fix: give them distinguishable
+ * names. Twenty-five teammates reading a call sheet cannot tell two identical
+ * "Ashka Patel" rows apart either, and neither can whoever is holding the desk
+ * index when one of them loses their link.
+ */
+function dedupeByIdentity(rows) {
+  const byIdentity = new Map();
+  for (const row of rows) {
+    const id = rosterIdentity(row);
+    if (!byIdentity.has(id)) byIdentity.set(id, []);
+    byIdentity.get(id).push(row);
+  }
+
+  const kept = [];
+  const errors = [];
+  for (const group of byIdentity.values()) {
+    if (group.length === 1) {
+      kept.push(group[0]);
+      continue;
+    }
+    const where = group.map((r) => `row ${r.__row}${r.__sheet ? ` on ${r.__sheet}` : ''}`);
+    for (const row of group) {
+      errors.push({
+        row: row.__row,
+        sheet: row.__sheet ?? null,
+        message:
+          `"${row.name}" appears ${group.length} times as a ${row.roleLabel} ` +
+          `(${where.join(', ')}) and nothing tells them apart. ` +
+          'If these are two people, give them distinguishable names; ' +
+          'if it is one person, delete the duplicate row.',
+      });
+    }
+  }
+  // Errors come back in row order so the panel reads down the sheet, not down
+  // the order the identities happened to hash into.
+  errors.sort((a, b) => a.row - b.row);
+  return { rows: kept, errors };
+}
+
+/**
  * @param {string|null} [opts.defaultRoleId] the role for rows with no Role/Type
  *   cell. Set per *sheet*, never guessed per row: the Roster tab is dancers by
  *   definition, and a People row without a Type is a row somebody has not
@@ -581,7 +656,8 @@ export function normalizeRosterRows(rawRows, opts = {}) {
     });
   }
 
-  return { rows, errors };
+  const deduped = dedupeByIdentity(rows);
+  return { rows: deduped.rows, errors: [...errors, ...deduped.errors] };
 }
 
 /**
@@ -603,5 +679,9 @@ export function normalizeRosterSheets(sheets) {
     rows.push(...out.rows);
     errors.push(...out.errors);
   }
-  return { rows, errors };
+  // Again across the whole upload, because the per-sheet pass cannot see a
+  // person entered on People *and* on Roster — the likeliest duplicate of all,
+  // since a dancer who is also on staff is exactly who gets typed onto both.
+  const deduped = dedupeByIdentity(rows);
+  return { rows: deduped.rows, errors: [...errors, ...deduped.errors] };
 }

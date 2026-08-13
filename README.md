@@ -49,7 +49,7 @@ npm run days -- --friday 2027-02-12   # pin the whole weekend from one date
 ### Tests
 
 ```bash
-npm test        # 507 tests, no build and no server needed
+npm test        # 618 tests, no build and no server needed
 npm run ci      # what CI runs: the client typecheck and build, then the tests
 ```
 

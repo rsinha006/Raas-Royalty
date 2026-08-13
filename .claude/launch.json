@@ -5,7 +5,8 @@
       "name": "royalty",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "start"],
-      "port": 4000
+      "port": 4000,
+      "autoPort": true
     }
   ]
 }

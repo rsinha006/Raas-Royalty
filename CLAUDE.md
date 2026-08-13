@@ -21,7 +21,7 @@ otherwise the reasoning is lost between sessions and gets re-litigated.
 npm install && npm run seed && npm run build && npm start   # http://localhost:4000
 npm run dev          # hot reload: client :5173, API :4000
 npm run seed:reset   # rebuild placeholder data from scratch
-npm test             # 562 tests
+npm test             # 618 tests
 npm run ci           # what CI runs: the client typecheck and build, then the tests
 npm run codes -- --list   # every live access code and its subject
 npm run days              # the four event days; --friday YYYY-MM-DD moves them all
@@ -75,7 +75,7 @@ React/Vite bundle from `client/dist`. No external services.
 - `client/src/viewer/` — the participant app
 - `client/src/admin/` — the logistics panel
 
-Sixteen things worth knowing before changing anything:
+Seventeen things worth knowing before changing anything:
 
 **Block targets are four-way, and the fourth is not like the others.** A block
 targets a team, a person, a role, or `everyone` — the announcement audience,
@@ -114,6 +114,23 @@ anything that does not calculate them reads as a few note rows and no errors at
 all, and applying that against `removeMissing` deletes every managed block
 behind a green result. A row with one non-empty cell is a note (the Export tab
 ends with three), not five errors on every correct import.
+
+**A person is name + display role, and that is not unique.** `rosterIdentity()`
+in `sync/normalize.js` is the only definition of it, and `computeRosterDiff`
+imports it rather than rebuilding the string — two definitions would let through
+exactly the rows the check exists to catch. Team is deliberately out of the key
+so a transfer reads as an update rather than a delete plus a create. ⚠️ `Ashka
+Patel` is two people (see `docs/decisions.md`), so **same-identity rows are
+refused, both of them, never first-wins**: the two rows differ in `email` and
+`phone`, which is what decides whose phone gets whose access link. The bug this
+replaces was invisible on the first import and permanent after the second — the
+first created both people, and every re-sync wrote *both* rows onto whichever
+one the lookup kept, so the other was never updated again while still holding a
+live code. Checked in two places because it has two sources: two rows in one
+upload (per tab, then again across the upload — one person on People *and*
+Roster is the likeliest duplicate of all), and one row matching two people
+already in the database. ⚠️ A refused row still counts as *seen*, or
+`removeMissing` deletes the pair.
 
 **A person's own address and the card they call are different columns.**
 `people.email` / `people.phone` are theirs, and are how item 25 sends them their

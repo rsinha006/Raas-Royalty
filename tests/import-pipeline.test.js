@@ -42,12 +42,16 @@ const {
   isCaptainCell,
   normalizeDay,
   normalizeRosterRows,
+  normalizeRosterSheets,
   normalizeScheduleRows,
   normalizeTime,
   parseContactCell,
   resolveAssignment,
+  rosterIdentity,
 } = await import('../server/sync/normalize.js');
-const { computeScheduleDiff, computeRosterDiff } = await import('../server/sync/diff.js');
+const { computeScheduleDiff, computeRosterDiff, applyRosterDiff } = await import(
+  '../server/sync/diff.js'
+);
 const { ingest } = await import('../server/sync/index.js');
 const { listAllBlocks } = await import('../server/lib/queries.js');
 
@@ -640,6 +644,319 @@ describe('roster row validation', () => {
     const diff = computeRosterDiff(rows);
     assert.deepEqual(diff.createTeams, [{ name: 'Delta Crew' }]);
     assert.equal(diff.createPeople.length, 2);
+  });
+});
+
+/* ====================================================================== *
+ * Name collisions — two rows the importer cannot tell apart
+ *
+ * A person is identified by name + display role, and on a ~200-dancer roster
+ * that is not unique: the event director confirmed two people genuinely share
+ * a name. The importer cannot resolve that and must not try, because the two
+ * rows differ in exactly the fields that decide whose phone receives whose
+ * access link.
+ *
+ * The failure this replaces was silent and only appeared on the *second*
+ * import: the first created two people, and every re-sync after it wrote both
+ * rows onto whichever one the lookup kept, leaving the other permanently
+ * unreachable by the spreadsheet while still holding a live code.
+ * ====================================================================== */
+
+describe('roster name collisions', () => {
+  const rosterRows = (...objects) => objects.map((o, i) => ({ __row: i + 2, ...o }));
+
+  test('two rows naming the same person are both refused, not merged or picked', () => {
+    const { rows, errors } = normalizeRosterRows(
+      rosterRows(
+        { name: 'Ashka Patel', role: 'Dancer', team: 'Alpha Crew', email: 'ashka.p@x.edu' },
+        { name: 'Ashka Patel', role: 'Dancer', team: 'Alpha Crew', email: 'a.patel2@x.edu' }
+      )
+    );
+    // Neither survives. Keeping the first would be a guess about which is real.
+    assert.equal(rows.length, 0);
+    assert.equal(errors.length, 2);
+    assert.deepEqual(errors.map((e) => e.row), [2, 3]);
+    for (const err of errors) {
+      assert.match(err.message, /"Ashka Patel" appears 2 times as a Dancer/);
+      assert.match(err.message, /row 2.*row 3/);
+      assert.match(err.message, /distinguishable names/);
+    }
+  });
+
+  test('an unrelated row in the same file is untouched by the refusal', () => {
+    const { rows, errors } = normalizeRosterRows(
+      rosterRows(
+        { name: 'Ashka Patel', role: 'Dancer', team: 'Alpha Crew' },
+        { name: 'Riya Shah', role: 'Dancer', team: 'Alpha Crew' },
+        { name: 'Ashka Patel', role: 'Dancer', team: 'Alpha Crew' }
+      )
+    );
+    assert.deepEqual(rows.map((r) => r.name), ['Riya Shah']);
+    assert.deepEqual(errors.map((e) => e.row), [2, 4]);
+  });
+
+  test('one name and two roles is two people, and imports as two', () => {
+    // The case the identity key exists to keep apart, from diff.js's own
+    // comment: "Jordan Alvarez the dancer" vs "Jordan Alvarez the judge".
+    const { rows, errors } = normalizeRosterRows(
+      rosterRows(
+        { name: 'Jordan Alvarez', role: 'Dancer', team: 'Alpha Crew' },
+        { name: 'Jordan Alvarez', role: 'Judge' }
+      )
+    );
+    assert.deepEqual(errors, []);
+    assert.equal(rows.length, 2);
+  });
+
+  test('spacing and case are not what tells two people apart', () => {
+    const { rows, errors } = normalizeRosterRows(
+      rosterRows(
+        { name: 'Ashka Patel', role: 'Dancer', team: 'Alpha Crew' },
+        { name: '  ashka   PATEL ', role: 'Dancer', team: 'Alpha Crew' }
+      )
+    );
+    assert.equal(rows.length, 0);
+    assert.equal(errors.length, 2);
+  });
+
+  test('a food-restriction mark does not make someone a second person', () => {
+    // The `*` comes off the name before anything else looks at it, so these are
+    // one person entered twice — which is the other half of this refusal.
+    const { rows, errors } = normalizeRosterRows(
+      rosterRows(
+        { name: 'Devin Osei', role: 'Dancer', team: 'Alpha Crew' },
+        { name: 'Devin Osei**', role: 'Dancer', team: 'Alpha Crew' }
+      )
+    );
+    assert.equal(rows.length, 0);
+    assert.equal(errors.length, 2);
+  });
+
+  test('the same person on People and on Roster is caught across the two tabs', () => {
+    // The per-sheet pass cannot see this one, and it is the likeliest duplicate
+    // of all: a dancer who also holds a staff job gets typed onto both tabs.
+    const { rows, errors } = normalizeRosterSheets([
+      {
+        sheetName: 'People',
+        rows: [{ __row: 2, __sheet: 'People', 'full name': 'Ashka Patel', type: 'Dancer', team: 'Alpha Crew' }],
+      },
+      {
+        sheetName: 'Roster',
+        rows: [{ __row: 2, __sheet: 'Roster', 'first name': 'Ashka', 'last name': 'Patel', team: 'Alpha Crew' }],
+      },
+    ]);
+    assert.equal(rows.length, 0);
+    assert.equal(errors.length, 2);
+    // Each error names its own tab — they both have a row 2.
+    assert.deepEqual(errors.map((e) => e.sheet).sort(), ['People', 'Roster']);
+    for (const err of errors) assert.match(err.message, /on People.*on Roster|on Roster.*on People/);
+  });
+
+  test('a clean two-tab upload is unaffected', () => {
+    const { rows, errors } = normalizeRosterSheets([
+      {
+        sheetName: 'People',
+        rows: [{ __row: 2, __sheet: 'People', 'full name': 'Lee Marchetti', type: 'Liaison', team: 'Alpha Crew' }],
+      },
+      {
+        sheetName: 'Roster',
+        rows: [{ __row: 2, __sheet: 'Roster', 'first name': 'Riya', 'last name': 'Shah', team: 'Alpha Crew' }],
+      },
+    ]);
+    assert.deepEqual(errors, []);
+    assert.equal(rows.length, 2);
+  });
+
+  /* ---- against people already in the database ---- */
+
+  test('a row matching two existing people is refused rather than applied to one', () => {
+    // The fixture holds two real people called "Sam Shared", both dancers —
+    // the state a pre-fix import left behind, and one a hand-added roster row
+    // can still reach. The sheet-level check cannot see this; the diff must.
+    const { rows } = normalizeRosterRows(
+      rosterRows({ name: 'Sam Shared', role: 'Dancer', team: 'Alpha Crew', email: 'sam@x.edu' })
+    );
+    assert.equal(rows.length, 1, 'one row is not a duplicate of itself');
+
+    const diff = computeRosterDiff(rows);
+    assert.equal(diff.createPeople.length, 0, 'must not create a third Sam');
+    assert.equal(diff.updatePeople.length, 0, 'must not write onto a coin flip');
+    assert.equal(diff.errors.length, 1);
+    assert.equal(diff.errors[0].row, 2);
+    assert.match(diff.errors[0].message, /2 people on the roster are already called "Sam Shared"/);
+    assert.equal(diff.hasChanges, false);
+  });
+
+  test('an ambiguous name is not a missing one, so removeMissing leaves both alone', () => {
+    // The trap: a refused row counts as *seen*. Treating it as absent would
+    // turn "the importer declined to touch this" into two people deleted.
+    const { rows } = normalizeRosterRows(
+      rosterRows({ name: 'Sam Shared', role: 'Dancer', team: 'Alpha Crew' })
+    );
+    const diff = computeRosterDiff(rows, { removeMissing: true });
+    const removed = diff.deletePeople.map((p) => p.label);
+    assert.ok(!removed.some((l) => l.startsWith('Sam Shared')), `Sam Shared in ${removed}`);
+  });
+
+  test('a refused row contributes nothing — not its team, not its contact card', () => {
+    // ⚠️ The team and contact pushes must stay *below* the refusal. Above it, a
+    // row the importer declined to apply still created a team with no members
+    // — which item 5's backfill then mints a live access code for — and a card
+    // nothing points at, and made `hasChanges` true, which is what enables the
+    // Apply button.
+    const { rows } = normalizeRosterRows(
+      rosterRows({
+        name: 'Sam Shared',
+        role: 'Dancer',
+        team: 'Nova Crew',
+        'contact person/method': 'Zed Quill / 555-0199',
+      })
+    );
+    const diff = computeRosterDiff(rows);
+    assert.equal(diff.errors.length, 1);
+    assert.deepEqual(diff.createTeams, [], 'a refused row must not create its team');
+    assert.deepEqual(diff.createContacts, [], 'nor its contact card');
+    assert.equal(diff.hasChanges, false, 'nothing to apply means the Apply button stays off');
+  });
+
+  test('an all-refused file cannot drive removeMissing into pruning the roster', () => {
+    // ⚠️ `hasChanges` counts deletePeople, so "nothing resolved" and "nothing to
+    // do" are different questions. Asking the wrong one let a file naming only
+    // ambiguous people delete everybody it did not name — with the refusal
+    // reported alongside, so it read as a partial success.
+    const { rows } = normalizeRosterRows(
+      rosterRows({ name: 'Sam Shared', role: 'Dancer', team: 'Alpha Crew' })
+    );
+    const diff = computeRosterDiff(rows, { removeMissing: true });
+    const resolved = diff.createPeople.length + diff.updatePeople.length + diff.unchanged;
+    assert.equal(diff.errors.length, 1);
+    assert.equal(resolved, 0, 'no row resolved to a person');
+    assert.ok(diff.deletePeople.length > 0, 'the pruning the route must refuse to run');
+    // The route's gate is `resolved`, never `hasChanges` — which is true here
+    // precisely *because* of the deletions it would be authorising.
+    assert.equal(diff.hasChanges, true);
+  });
+
+  test('the refusal does not spread to people whose name is unambiguous', () => {
+    const { rows } = normalizeRosterRows(
+      rosterRows(
+        { name: 'Sam Shared', role: 'Dancer', team: 'Alpha Crew' },
+        { name: 'Alice Alpha', role: 'Dancer', team: 'Alpha Crew' }
+      )
+    );
+    const diff = computeRosterDiff(rows);
+    assert.equal(diff.errors.length, 1);
+    assert.equal(diff.unchanged, 1, 'Alice still resolves to herself');
+  });
+
+  test('the diff and the sheet reader agree on what one person is', () => {
+    // Two definitions of identity would let through exactly the rows the check
+    // exists to catch, so there is only one function and both sides call it.
+    assert.equal(
+      rosterIdentity({ name: '  Ashka   Patel ', roleId: 'dancer' }),
+      rosterIdentity({ name: 'ashka patel', roleId: 'dancer' })
+    );
+    assert.notEqual(
+      rosterIdentity({ name: 'Ashka Patel', roleId: 'dancer' }),
+      rosterIdentity({ name: 'Ashka Patel', roleId: 'judge' })
+    );
+  });
+
+  test('a re-sync cannot resurrect the bug by creating the pair first', async () => {
+    // The regression, end to end and in the order it actually happened: import
+    // the duplicate rows, then re-sync with one address corrected. Before the
+    // refusal this created two people and then wrote both rows onto one of
+    // them, leaving the other frozen at whatever the first import gave it.
+    const sheet = (e1, e2) =>
+      normalizeRosterRows(
+        rosterRows(
+          { name: 'Nia Okonkwo', role: 'Dancer', team: 'Alpha Crew', email: e1 },
+          { name: 'Nia Okonkwo', role: 'Dancer', team: 'Alpha Crew', email: e2 }
+        )
+      ).rows;
+
+    const first = computeRosterDiff(sheet('nia.o@x.edu', 'n.okonkwo@x.edu'));
+    applyRosterDiff(first, { editedBy: 'test', source: 'import' });
+
+    const count = () =>
+      db.prepare("SELECT COUNT(*) AS n FROM people WHERE name = 'Nia Okonkwo'").get().n;
+    assert.equal(count(), 0, 'the pair is never created, so the ambiguity never exists');
+
+    const second = computeRosterDiff(sheet('nia.o@x.edu', 'nia.okonkwo@x.edu'));
+    applyRosterDiff(second, { editedBy: 'test', source: 'import' });
+    assert.equal(count(), 0);
+  });
+});
+
+/* ====================================================================== *
+ * The roster import route, for the refusal the diff alone cannot enforce
+ * ====================================================================== */
+
+describe('the roster import route refuses what the diff only reports', () => {
+  let server;
+  let base;
+  let cookie;
+
+  before(async () => {
+    process.env.ADMIN_PASSWORD = 'test-admin-password';
+    const { createApp } = await import('../server/app.js');
+    server = createApp({ serveClient: false }).listen(0);
+    base = `http://127.0.0.1:${server.address().port}`;
+    const res = await fetch(`${base}/api/admin/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'test-admin-password', name: 'Importer' }),
+    });
+    cookie = (res.headers.getSetCookie?.() ?? []).map((c) => c.split(';')[0]).join('; ');
+  });
+
+  after(() => server?.close());
+
+  /** Upload a roster CSV the way the panel does, as multipart. */
+  async function upload(url, csvText, extra = {}) {
+    const form = new FormData();
+    form.append('file', new Blob([csvText], { type: 'text/csv' }), 'roster.csv');
+    for (const [k, v] of Object.entries(extra)) form.append(k, v);
+    const res = await fetch(base + url, { method: 'POST', headers: { cookie }, body: form });
+    return { status: res.status, body: await res.json() };
+  }
+
+  const AMBIGUOUS = 'Name,Role,Team\nSam Shared,Dancer,Alpha Crew\n';
+
+  test('a file whose every row was refused is not applied, even with prune on', async () => {
+    // ⚠️ The regression this pins: the gate was `!diff.hasChanges`, and
+    // `hasChanges` counts `deletePeople`. Under removeMissing an all-refused
+    // file therefore read as "changes to apply" — and the changes were the
+    // deletion of everybody the file did not name.
+    const before = db.prepare('SELECT COUNT(*) AS n FROM people').get().n;
+
+    const { status, body } = await upload('/api/admin/roster/import/preview', AMBIGUOUS, {
+      removeMissing: 'true',
+    });
+    assert.equal(status, 200);
+    assert.equal(body.validRows, 0, 'the only row was refused');
+    assert.equal(body.errors.length, 1);
+    assert.match(body.errors[0].message, /already called "Sam Shared"/);
+
+    const commit = await fetch(`${base}/api/admin/roster/import/commit`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie },
+      body: JSON.stringify({ token: body.token, removeMissing: true }),
+    });
+    assert.equal(commit.status, 400);
+    assert.match((await commit.json()).error, /nothing was applied/);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM people').get().n, before, 'nobody pruned');
+  });
+
+  test('the preview counts a diff-refused row as invalid, not as valid', async () => {
+    const { body } = await upload(
+      '/api/admin/roster/import/preview',
+      `Name,Role,Team\nSam Shared,Dancer,Alpha Crew\nWholly New,Dancer,Alpha Crew\n`
+    );
+    assert.equal(body.parsedRows, 2);
+    assert.equal(body.validRows, 1, 'the ambiguous row does not count as valid');
+    assert.equal(body.errors.length, 1);
+    assert.equal(body.diff.createPeople.length, 1);
   });
 });
 

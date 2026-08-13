@@ -881,8 +881,13 @@ export function adminRouter({ broadcast }) {
         sheetNames: sheets.map((s) => s.sheetName).filter(Boolean),
         headers: sheets[0].headers,
         parsedRows: sheets.reduce((n, s) => n + s.rows.length, 0),
-        validRows: rows.length,
-        errors,
+        // A row the diff refused is not a valid row, whatever the sheet said.
+        validRows: rows.length - diff.errors.length,
+        // One list, so the preview shows a row the *diff* refused next to one
+        // the sheet reader refused. They are the same thing to whoever has to
+        // go and fix the spreadsheet, and a refusal that only appears after
+        // Apply is one discovered by the person it already cost.
+        errors: [...errors, ...diff.errors],
         diff,
         removeMissing: req.body.removeMissing === 'true',
       });
@@ -901,13 +906,33 @@ export function adminRouter({ broadcast }) {
         return res.status(400).json({ error: 'Every row failed validation — nothing was applied.', errors });
       }
       const diff = computeRosterDiff(rows, { removeMissing: req.body.removeMissing === true });
+      const allErrors = [...errors, ...diff.errors];
+      /**
+       * The same refusal the sheet reader makes above, asked again because the
+       * diff can refuse rows the reader passed.
+       *
+       * ⚠️ The condition is **how many rows resolved to a person**, not
+       * `diff.hasChanges`. `hasChanges` counts `deletePeople`, so under
+       * `removeMissing` a file whose every row was refused still reads as
+       * "changes to apply" — and those changes are deletions. An upload naming
+       * only ambiguous people, with "treat this as the complete roster" ticked,
+       * would have pruned everybody the file did not name. Same shape as item
+       * 24's schedule refusal: the test is that nothing importable came out,
+       * never that some rows failed.
+       */
+      const resolved = diff.createPeople.length + diff.updatePeople.length + diff.unchanged;
+      if (!resolved && allErrors.length) {
+        return res
+          .status(400)
+          .json({ error: 'Every row failed validation — nothing was applied.', errors: allErrors });
+      }
       const updatedAt = applyRosterDiff(diff, {
         editedBy: editorName(req),
         source: 'import',
         batchId: req.batchId,
       });
       broadcast('roster:updated', { updatedAt });
-      res.json({ ok: true, diff, errors, updatedAt });
+      res.json({ ok: true, diff, errors: allErrors, updatedAt });
     } catch (err) {
       res.status(400).json({ error: err.message });
     }

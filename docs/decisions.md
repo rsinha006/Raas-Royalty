@@ -1650,3 +1650,76 @@ report is computed only when an admin asks, so the fan-out ceiling in
 and need no client change, but it answers "did this phone ask recently", not
 "what is on its screen" — and those differ in exactly the case that matters, a
 socket that dropped and a client that has stopped refetching.
+
+---
+
+## The release is stamped into the image, and the freeze is checked against it
+
+**Date:** 2026-08-13 · **Status:** decided
+
+**Question.** Item 27 says "tag the release, no changes after except genuine
+emergencies". A tag is one command — what else does a freeze need to be worth
+anything?
+
+**Decision.** Three pieces. `npm run freeze` gates and cuts an annotated
+`release-YYYY-MM-DD` tag; the Docker build stamps that release into the image as
+environment variables; and `npm run freeze -- --url <host>` compares the tag on
+this side against what the machine reports on the other, through `/api/health`.
+The Ops panel and the boot banner report the same thing for whoever has no
+terminal.
+
+**Why.** A freeze is a promise about what will be running on the Saturday, and
+before this nothing could check it. The server had no idea what it was. "Is the
+machine running what we froze, or something somebody pushed on Friday night?"
+is a comparison across two sides that each hold half the answer, so it needs
+both halves to exist.
+
+⚠️ **The identity has to be baked in at build time.** `.git/` is in
+`.dockerignore` deliberately — an image gets pushed to a registry — so there is
+no repository inside the container and `git describe` on the machine cannot work
+by construction. Deriving it at runtime is the `__dirname`-versus-`dataDir` bug
+from the deploy decision in another costume: flawless on a laptop, where the
+source tree is right there, and silently absent on the one machine it matters
+on. Four `--build-arg`s are the entire channel, which is why the freeze script
+prints the deploy line filled in rather than leaving it to be typed.
+
+⚠️ **Rejected: falling back to `package.json`'s version.** It is always
+available, which is exactly the problem — it says `1.0.0`, it is in every image
+ever built, and it has never changed. A drift check reading it would compare
+`1.0.0` against `1.0.0` and report a permanent, silent match between the frozen
+release and whatever is actually deployed. `unknown` looks worse and is much
+better: it shows up as a warning in `preflight` and a banner on the panel. There
+is a test that the fallback never appears.
+
+**"The server cannot say" is a third answer, not agreement.** Same shape as the
+three presence states in the entry above, for the same reason — the two-state
+version is where the comfortable lie lives.
+
+**A dirty working tree is the one refusal `--force` cannot reach.** Every other
+blocker (readiness, a red suite, freezing off `main`) is a judgement somebody at
+1pm on the Saturday may legitimately override, and an override is written into
+the tag message so the next person reads it rather than discovering it. A tag
+over uncommitted changes is not a judgement call — it names contents that exist
+nowhere and cannot be rebuilt or rolled back to.
+
+**The gate composes the readiness report rather than re-asking it**, exactly as
+that entry argued: a freeze is the last moment anybody looks, and a gate that
+disagrees with `npm run rehearsal` on the Wednesday gets argued with instead of
+obeyed.
+
+**Tags are sequenced `.1`, `.2` within a day, and the sequence is a number.**
+Git returns tags sorted as text, so `.10` sorts before `.2` and "the latest
+freeze" — the tag every drift check compares against — silently becomes an older
+one. `nextFreezeTag` takes one past the highest for that date rather than the
+first free gap, because filling `.1` while `.10` exists cuts a release that sorts
+before releases that already happened.
+
+**Rejected: a freeze check that runs on the server.** It has no repository to
+read, so it could only ever report the value it was handed — which is the half
+it already reports through `/api/health`. Putting the comparison there would
+have looked like more coverage and been strictly less.
+
+**What this does not do.** Nothing prevents a push, a deploy, or an edit during
+event week; there is no branch protection and no lockout. The freeze is a
+recorded intent plus the ability to notice it has been departed from — which is
+the honest limit for a project one person deploys.

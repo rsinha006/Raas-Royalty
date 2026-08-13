@@ -185,6 +185,30 @@ does not move anybody else's "last updated", comparing against a global
 timestamp would report every phone in the room as behind whenever any team
 changed.
 
+## Freezing it
+
+**[docs/freeze.md](docs/freeze.md)** is the Wednesday-before procedure, and the
+one for a genuine emergency after it.
+
+```bash
+npm run freeze                 # can this be frozen, and what is frozen now?
+npm run freeze -- --tag        # the gate, then the annotated tag
+npm run freeze -- --check --no-verify --url https://<host>   # is the machine holding it?
+```
+
+The gate refuses a dirty working tree, a red build, and item 26's readiness
+blockers, then cuts `release-YYYY-MM-DD` — dated in the venue's zone, with the
+event dates, the roster counts and the test result in the tag message.
+
+⚠️ **The running machine has to be able to name its own release, and the build
+is the only channel.** `.git/` is in `.dockerignore`, so there is no repository
+in the image to interrogate; a plain `fly deploy` produces a server that reports
+`unknown` and is indistinguishable from any other build. The `--build-arg` line
+`npm run freeze` prints is what closes that, and `/api/health`, the boot banner
+and **Admin → Ops → Release** all report the result. ⚠️ Nothing falls back to
+`package.json`'s version — it is present in every image and has never changed,
+so a drift check reading it would report a match forever.
+
 ## Data model
 
 | Table | Notes |

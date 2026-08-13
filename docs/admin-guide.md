@@ -5,7 +5,13 @@ it, or keep it open on the laptop that is running the panel.
 
 The runbooks it sits on top of: [ops.md](ops.md) when the app itself is wrong,
 [deploy.md](deploy.md) for the machine, [loading-data.md](loading-data.md) for
-the spreadsheet, [distributing-links.md](distributing-links.md) for the links.
+the spreadsheet, [distributing-links.md](distributing-links.md) for the links,
+[freeze.md](freeze.md) before anybody changes the code this week.
+
+⚠️ **Almost nothing that goes wrong this weekend needs a code change**, and
+[freeze.md](freeze.md) opens with the table proving it: running late, a moved
+block, an evacuation, a bad change, a lost link and a stale sheet all have an
+answer on this page. If somebody offers to push a fix, check that table first.
 
 **Read this before the dress rehearsal** — [dress-rehearsal.md](dress-rehearsal.md)
 ends by handing you the laptop and asking you to answer "I don't see my warm-up"

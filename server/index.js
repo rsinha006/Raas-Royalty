@@ -9,6 +9,7 @@ import { clearChangeFlags } from './lib/mutations.js';
 import { startPolling, syncStatus } from './sync/index.js';
 import { usingDefaultPassword } from './lib/auth.js';
 import { eventTimeState } from './lib/event-time.js';
+import { currentRelease } from './lib/release.js';
 import { assertBootConfig } from './lib/deploy-config.js';
 import { createLiveHub, originPolicy, roomsForTargets } from './lib/live.js';
 import { backupStatus, hasOffBoxTarget, startBackups, staleAfterMs } from './lib/backup.js';
@@ -160,7 +161,14 @@ startPolling((result) => {
 
 server.listen(PORT, () => {
   const status = syncStatus();
+  const release = currentRelease();
   console.log(`\n  Royalty schedule server → http://localhost:${PORT}`);
+  /**
+   * Item 27. First line after the address on purpose: this is read off a `fly
+   * logs` tail by somebody establishing what is actually running before they
+   * change anything, and "unknown" has to be as visible as a version would be.
+   */
+  console.log(`  Release: ${release.summary}${release.builtAt ? ` · built ${release.builtAt}` : ''}`);
   console.log(`  Database: ${dbPath}`);
   console.log(
     `  Event time: ${eventTime.wallClock.replace('T', ' ')} ${eventTime.abbreviation} ` +

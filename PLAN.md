@@ -14,12 +14,13 @@ competition weekend. **Read this at the start of every session.**
 ## Where things stand
 
 **Done: Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13,
-14, 19, 20, 22, 23 and 28. Items 21, 24, 25 and 26 are half done** — item 21's
+14, 19, 20, 22, 23, 27 and 28. Items 21, 24, 25 and 26 are half done** — item 21's
 accessibility and responsive pass has landed and its hardware checks are open;
 items 24 and 25 turned out to have real engineering in them, which is done, and
 what remains of both is the roster itself; item 26's tooling and script are
-built and the rehearsal itself needs a room full of people. Last updated
-2026-08-13.
+built and the rehearsal itself needs a room full of people. Item 27's gate, tag
+and drift check are built, and the freeze itself waits on a date and a machine.
+Last updated 2026-08-13.
 
 - The viewer is **behind access codes**, enforced server-side, with the roster
   no longer enumerable. Codes are managed and exported from the admin panel.
@@ -74,7 +75,14 @@ built and the rehearsal itself needs a room full of people. Last updated
   connected** answers "did everyone get that?" from the sockets rather than from
   asking the room, per subject rather than against the event's clock. The
   restore drill has been performed and timed.
-- **562 tests run in CI**, covering authorization negatives, timezone and DST,
+- **The release that goes to the venue is tagged, and the machine can be asked
+  whether it is holding it.** `npm run freeze` refuses a dirty tree, a red build
+  and item 26's blockers, then cuts an annotated `release-YYYY-MM-DD` carrying
+  the event dates and the roster counts. ⚠️ The running server can only name its
+  own release if the *build* stamped it — there is no repository inside the image
+  — so a plain `fly deploy` produces a machine indistinguishable from any other,
+  which `preflight` and the Ops panel now say out loud.
+- **602 tests run in CI**, covering authorization negatives, timezone and DST,
   code management, the schema migrations, broadcast scoping, the item 14
   correctness gaps, the bulk shift, the offline shell, preview fidelity,
   everything undo refuses, the announcement target, the measured colour
@@ -84,7 +92,9 @@ built and the rehearsal itself needs a room full of people. Last updated
   refuse without moving the schedule — the event template's own tabs and
   columns, so a renamed one is a red build, the rule that no shared contact
   card can ever become a link recipient, and — new — the per-subject comparison
-  behind "is this phone up to date" and every way the readiness gate refuses.
+  behind "is this phone up to date", every way the readiness gate refuses, and —
+  new — every way the freeze gate does, including a release identity that must
+  never fall back to a version string that has never changed.
 - **The app is usable by someone who cannot see it.** Headings, landmarks and a
   real list where there were only `div`s; every colour measured against AA
   rather than eyeballed; one keyboard tab pattern instead of four broken ones;
@@ -100,7 +110,10 @@ The open decisions are all resolved (see below); item 12 was reshaped by them.
 config, the guardrails and the runbook, but the `fly deploy` itself needs an
 account and has not been run, so item 23's backup target, heartbeat and alert
 webhook are configured-for rather than pointed at anything. And no real data —
-which `npm run rehearsal` now says out loud, in the form of four blockers.
+which `npm run rehearsal` now says out loud, in the form of four blockers. **And
+nothing is frozen**, because a freeze needs both of those first: item 27's gate
+refuses this tree today on the dates and the roster, and its `--url` half has no
+machine to ask.
 
 **Next up: the rest of items 24 and 25, which are one people problem** — the
 real dates, ~80 staff and ~200 dancers into the template with an address each,
@@ -117,6 +130,9 @@ hands, not code — run [docs/device-matrix.md](docs/device-matrix.md) before th
 dress rehearsal. Item 28's code is done; what it leaves for people is naming the
 on-call ([docs/admin-guide.md](docs/admin-guide.md) has the table to fill in)
 and actually printing the pack, which is worth nothing until the roster is real.
+Item 27 is the same shape: `npm run freeze` is built and it refuses this tree
+today, correctly, for the reasons above — the freeze itself is a Wednesday, once
+there is a weekend to be the Wednesday before.
 
 ### Build order
 
@@ -1571,9 +1587,98 @@ Freezing one phone's process and editing its team put exactly one row into
 own phones, the venue, and real data in the database. Everything above only
 makes it possible to run and to believe.
 
-### 27. `[ ]` Freeze on the Wednesday before
+### 27. `[x]` Freeze on the Wednesday before
 
 Tag the release. No changes after except genuine emergencies.
+
+**Done 2026-08-13** — `server/lib/release.js`, `server/lib/freeze.js`,
+`scripts/freeze.js`, a `release-identity` deploy check, a Release card on the
+Ops tab, four build args in the Dockerfile, and 40 new tests
+(`tests/freeze.test.js`, 602 total). The runbook, including what counts as an
+emergency, is [docs/freeze.md](docs/freeze.md).
+
+```bash
+npm run freeze                 # can this be frozen, and what is frozen now?
+npm run freeze -- --tag        # the gate, then the annotated tag
+npm run freeze -- --check --no-verify --url https://<host>   # is the machine holding it?
+```
+
+- ⚠️ **A tag nobody can check is a note in a calendar.** The freeze is a promise
+  about what will be running on the Saturday, and verifying it is a comparison
+  across two sides that each hold half the answer: this repository knows the tag,
+  and the machine knows what was built into it. Nothing in this project could
+  answer the second half before — the server had no idea what it was, and neither
+  did `/api/health`.
+- ⚠️ **The identity has to be baked in at build time, and that is not a
+  preference.** `.git/` is in `.dockerignore` on purpose, because an image gets
+  pushed to a registry — so there is no repository inside the container and
+  `git describe` on the machine cannot work *by construction*. This is the
+  `__dirname`-versus-`dataDir` bug from item 22 in another costume: runtime
+  derivation is flawless on the laptop, where the two are the same thing, and
+  silent on the one machine the answer matters on. Four `--build-arg`s are the
+  whole channel, `npm run freeze` prints them filled in, and a plain `fly deploy`
+  is a `warn` rather than a failure — an unlabelled server still serves 280
+  people correctly.
+- ⚠️ **`package.json`'s version is not a release identity, and using it would
+  have been worse than having none.** It says `1.0.0`, it is in every image ever
+  built, and it has never changed. A drift check reading it compares `1.0.0`
+  against `1.0.0` and reports a permanent, silent match between the frozen
+  release and whatever is actually deployed. `unknown` is a worse-looking answer
+  and a far better one; there is a test that the fallback never appears.
+- ⚠️ **"The server cannot say" is its own answer, not agreement.** Three states
+  again, as in item 26's presence check — holding the freeze, holding something
+  else, and unable to name itself — because the two-state version is where the
+  comfortable lie lives.
+- ⚠️ **Found while writing the tests, in my own code: the sequence in
+  `release-2026-08-19.10` is a number, and git returns tags sorted as text.**
+  `.10` sorted before `.2`, so "the latest freeze" — the tag every drift check
+  compares the machine against — would quietly have been an older one. The same
+  bug twice: once in the tag listing, once in the tags on HEAD. And
+  `nextFreezeTag` now takes one past the highest for that date rather than the
+  first free gap, because filling `.1` while `.10` exists cuts a release that
+  sorts *before* releases that already happened.
+- **A dirty tree is the one refusal `--force` cannot reach.** Every other blocker
+  is a judgement somebody at 1pm on the Saturday may legitimately override, and
+  the override is written into the tag message so the next person reads it rather
+  than discovering it. A tag over uncommitted changes is not a judgement call —
+  it names contents that exist nowhere and cannot be rebuilt or rolled back to.
+- **The gate composes item 26 rather than re-asking it**, same rule and the same
+  reason: a freeze is the last moment anybody looks, and a gate that disagrees
+  with `npm run rehearsal` on the Wednesday gets argued with instead of obeyed.
+- **The tag message is the record.** `git show release-2026-08-19` gives the
+  event dates, the roster and block counts, the test result and the deploy
+  command — what the event looked like when somebody decided this was the version
+  to run. A lightweight tag carries a commit and nothing about why.
+- **The freeze is affordable because the panel covers the live cases**, and
+  `docs/freeze.md` opens with the table saying so: running late, a moved block,
+  an evacuation, a bad change, a lost link and a stale sheet all have an answer
+  that is not a deploy. If the fix is in that table it is not an emergency.
+
+**Demonstrated, not just implemented.** Run against this repository, the gate
+refused on the two things actually true of it — an uncommitted working tree,
+naming the files, and four readiness blockers including dates four days in the
+past — and correctly warned that HEAD exists only on this laptop, which it does.
+Then against a second server started with the build args a deploy would set: the
+boot banner and `/api/health` both named `release-2026-09-09`, the Ops card read
+*A frozen release, built Sep 9, 10:02 AM* with the stamp beating the repository
+beside it, and `--url` produced all three answers in turn — nothing frozen, a
+match, and, after a second tag, `✗ The machine is running release-2026-09-09,
+not release-2026-09-10`. The demonstration tags were deleted afterwards; this
+repository has no freeze in it yet, correctly. The sorting, the sequencing and
+the gate's refusals are covered by tests against a real temporary repository
+rather than a mocked one.
+
+⚠️ **Found while demonstrating:** the dirty-file list was capped at ten inside
+the report *and* at eight in the renderer, so twenty uncommitted files printed
+eight of them and "…and 2 more". A truncation of a truncation, disagreeing with
+the count in its own title. The report now carries the whole list and only the
+renderer caps.
+
+**Still open — the freeze itself, which is a date:** nothing can be tagged until
+the event dates are real (item 24), and the `--url` check has only been run
+against a locally stamped server, because there is no deployed machine to ask
+(item 22). What exists now is that when there is one, "is it running what we
+froze" is one command rather than a shrug.
 
 ### 28. `[x]` Prep the humans
 
@@ -1668,6 +1773,8 @@ the 45 live codes.
 | The event dates are still a placeholder, and it is now in the past | `npm run days` moves the whole weekend from one date and refuses a wrong weekday. The mechanism exists; the number is the event director's | 24 |
 | ~~Thundering herd on every change~~ | Closed — one team's edit wakes 66 of 600 phones, and even an announcement to all 600 settles in ~140ms with no errors | 11, 20 |
 | A wrong change made under pressure and no way back | Closed — one admin action is one log entry and undo reverts all of it, refusing rather than half-applying | 17 |
+| An emergency change ships and nobody can say what is running | Closed — the release is stamped into the image at build and reported by `/api/health`, the boot banner and the Ops panel, and `npm run freeze -- --url` compares it against the tag. ⚠️ A plain `fly deploy` reports `unknown`, which is a warning rather than a match: there is no repository inside the image to derive it from | 27 |
+| Code changes during event week because nothing says not to | Half closed — `npm run freeze` cuts the tag behind the same gate the rehearsal uses, counts every commit made since it, and `docs/freeze.md` opens with the table of live problems the panel already solves. Nothing can *stop* a push; what has changed is that an untagged one is visible | 27 |
 | ~~A deploy comes up with the default admin password, or on a disk the next deploy wipes~~ | Closed — the server refuses to boot in production on either, plus two more that would otherwise pass a health check | 22 |
 | Scaling to a second machine silently forks the database | Half-closed — `--ha=false`, `min_machines_running = 1`, a test, and it is the first thing `docs/deploy.md` says. But nothing can *stop* `fly scale count 2`, so it stays a live risk during event week | 22 |
 | Printed paper is acted on after it goes stale | Half closed — every page is stamped with the time it was printed and says the phone wins, and the sheets come from the same query the phones run so they never start out disagreeing. Nothing stops somebody reading Thursday's copy on Saturday; saying it out loud when the app is down is in the guide | 28 |
@@ -1692,7 +1799,7 @@ the two that actually catch problems.
 | T-3 | Phase D + E (admin tooling, tests, load test) — Phase D ✅, item 19 ✅ and item 20 ✅ done early; item 21's audit ✅. |
 | T-2 | Phase F (deploy, ops) — item 22 ✅ configured and item 23 ✅ built; both need the deploy actually run, and item 23's three secrets pointed at real services. Plus item 21's device checks on real phones. |
 | T-1 | Items 24–26. Items 24 ✅, 25 ✅ and 26 ✅ engineering done early; the roster and the dates are the gate for all three. Dress rehearsal — script and readiness gate ready, needs the room. |
-| Event week | Items 27–28. Item 28 ✅ built early; what is left of it is naming the on-call and printing the pack. Freeze Wednesday. |
+| Event week | Items 27–28. Both ✅ built early; what is left of 28 is naming the on-call and printing the pack, and of 27 the Wednesday itself — `npm run freeze` refuses today's tree on the dates and the roster, which is the correct answer. |
 | After | Retro. Export the edit log to see what actually changed and how often. |
 
 ---

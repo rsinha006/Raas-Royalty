@@ -60,6 +60,13 @@ const GOOD_ENV = {
   // attached to it is an alarm nobody answers.
   ON_CALL_NAME: 'Priya Raman',
   ON_CALL_PHONE: '+1 555 0147',
+  // Item 27. A production deploy that cannot name its own release is not a
+  // clean one: `.git/` is not in the image, so nothing on the machine can tell
+  // the frozen release from an untagged push. The build stamps these in.
+  RELEASE: 'release-2026-09-09',
+  RELEASE_COMMIT: 'abcdef1234567890abcdef1234567890abcdef12',
+  RELEASE_BUILT_AT: '2026-09-09T14:00:00Z',
+  RELEASE_DIRTY: '0',
 };
 
 /**

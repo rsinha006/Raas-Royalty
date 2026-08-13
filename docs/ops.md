@@ -212,6 +212,12 @@ same reason.
 - [ ] **The paper is printed.** `npm run callsheets`, or Ops → Printed fallback.
       Everything on this page assumes the app comes back; the pack is what the
       venue runs on while it does not. See [admin-guide.md](admin-guide.md).
+- [ ] **The release is frozen and the machine is holding it.**
+      `npm run freeze -- --check --no-verify --url https://<host>` — see
+      [freeze.md](freeze.md). ⚠️ A machine that answers `unknown` was deployed
+      without the release build args: correct in every other way, and
+      indistinguishable from an untagged Friday-night push. Everything on this
+      page is a fact about *some* version; this is the one that says which.
 
 ## Still open
 

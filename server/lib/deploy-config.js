@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { releaseInfo } from './release.js';
+
 /**
  * Deploy configuration — checked at boot, and again from `npm run preflight`.
  *
@@ -72,6 +74,16 @@ export function inspectDeployConfig({
   appRoot = APP_ROOT,
   clientDist = CLIENT_DIST,
   nodeVersion = process.versions.node,
+  /**
+   * Derived from the environment being inspected, not from this process. The
+   * release *is* an environment variable — the Dockerfile bakes it in as one —
+   * so a gate that took its answer from `process.env` while judging some other
+   * env would report on the wrong deploy, which is the whole failure mode this
+   * check exists to catch. Uncached, and that is fine: the boot gate runs once,
+   * and the git fallback behind it only runs where a repository exists, which
+   * is never the machine.
+   */
+  release = releaseInfo({ env }),
 } = {}) {
   const production = env.NODE_ENV === 'production';
   const checks = [];
@@ -350,6 +362,39 @@ export function inspectDeployConfig({
         : 'ON_CALL_NAME / ON_CALL_PHONE unset. The heartbeat pages an unnamed person, and the ' +
           'printed desk sheet has a blank where the number should be.',
       'ON_CALL_NAME="Priya Raman" ON_CALL_PHONE="+1 555 0147" — and not somebody also running a camera.'
+    )
+  );
+
+  /* ------------------------------- release -------------------------------- */
+
+  /**
+   * Item 27. The freeze is a promise that the machine is running a known
+   * release, and the machine can only keep it if the build said so: `.git/` is
+   * in `.dockerignore`, so there is no repository in the image to interrogate
+   * and no runtime fallback that is honest. A plain `fly deploy` therefore
+   * produces a machine that cannot be told apart from any other, which is
+   * indistinguishable from a correct deploy in every way except the one that
+   * matters on the Saturday.
+   *
+   * `warn`, under the rule at the top of this file — an unlabelled server
+   * serves every phone correctly, and refusing to boot at 2am over a missing
+   * build-arg is exactly the trade this level exists to avoid. `npm run
+   * preflight` and `npm run freeze` are where it has to be green.
+   */
+  checks.push(
+    check(
+      'release-identity',
+      'warn',
+      release.known && !release.dirty,
+      'This build can say which release it is',
+      release.known
+        ? release.dirty
+          ? `${release.summary} — built from a tree with uncommitted changes, so the commit it ` +
+            'names does not describe what is running.'
+          : `${release.summary}, from ${release.source === 'env' ? 'the build' : 'git'}.`
+        : 'Unknown. Nothing in this process can tell the frozen release from an untagged push, ' +
+          'and the image has no repository in it to ask.',
+      'npm run freeze — it prints the fly deploy line with the build args. See docs/freeze.md.'
     )
   );
 

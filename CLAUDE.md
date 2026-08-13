@@ -33,9 +33,11 @@ npm run backup            # a verified snapshot now; --list shows what is kept
 npm run restore           # what is available to restore; --yes replaces the database
 npm run callsheets        # the printed fallback pack; --check reports who it misses
 npm run rehearsal         # can a dress rehearsal answer its own question? --check exits 1
+npm run freeze            # can this be tagged? --tag cuts it; --url asks a machine what it runs
 ```
 
 Deploying is Fly.io, one machine, one volume — [docs/deploy.md](docs/deploy.md).
+Freezing the release, and changing anything after it — [docs/freeze.md](docs/freeze.md).
 Backups, monitoring and alerting during the event — [docs/ops.md](docs/ops.md).
 The one page for whoever holds the panel — [docs/admin-guide.md](docs/admin-guide.md).
 
@@ -65,13 +67,15 @@ React/Vite bundle from `client/dist`. No external services.
 - `server/lib/call-sheets.js` — the printed fallback pack, and what it leaves out
 - `server/lib/presence.js` — which phones are connected, and what version each holds
 - `server/lib/readiness.js` — whether a rehearsal against this data would mean anything
+- `server/lib/release.js` — what this process was built from, or that it cannot say
+- `server/lib/freeze.js` — the freeze gate, the tag, and the drift against a machine
 - `server/sync/` — the import pipeline
 - `client/sw.js` — the offline shell, emitted by `client/vite-plugin-sw.js`
 - `client/src/tabstrip.ts` — the one ARIA tabs implementation, used by all four
 - `client/src/viewer/` — the participant app
 - `client/src/admin/` — the logistics panel
 
-Fifteen things worth knowing before changing anything:
+Sixteen things worth knowing before changing anything:
 
 **Block targets are four-way, and the fourth is not like the others.** A block
 targets a team, a person, a role, or `everyone` — the announcement audience,
@@ -271,6 +275,30 @@ resolve to a viewer subject — cookies are per browser, so the rehearsal driver
 own laptop otherwise sits in the list as a phone that never updates. Script:
 [docs/dress-rehearsal.md](docs/dress-rehearsal.md).
 
+**A machine that cannot name its release makes the freeze unfalsifiable.** Item
+27's tag is a promise about what will be running on the Saturday, and checking it
+is a comparison across two sides that each hold half the answer: `freeze.js` runs
+on a laptop and knows the tag, `release.js` runs on the machine and knows what
+was built in. ⚠️ **The identity must be baked in at build time** — `.git/` is in
+`.dockerignore` (an image gets pushed to a registry), so there is no repository
+in the container and runtime derivation is the `__dirname`-vs-`dataDir` bug
+again: perfect on the laptop, absent on the one machine it matters on. The
+`--build-arg RELEASE=…` line `npm run freeze` prints is the whole channel, which
+is why a plain `fly deploy` is a warn in `deploy-config.js` and says so on the
+Ops panel. Three traps, all of which make a green check meaningless rather than
+loud: ⚠️ **never fall back to `package.json`'s version** — it is `1.0.0`, it is
+in every image ever built, and a drift check reading it reports a permanent
+match; ⚠️ **"the server cannot say" is not agreement**, it is its own answer with
+its own copy; and ⚠️ **the sequence in `release-2026-08-19.10` is a number**,
+while git returns tags sorted as text, so `.10` lands before `.2` and "the latest
+freeze" silently becomes an older one — `nextFreezeTag` takes one past the
+highest for that date rather than the first free gap, because filling a gap cuts
+a release that sorts before ones already made. The gate composes `readiness.js`
+rather than re-asking it, same rule as item 26, and refuses a dirty tree with no
+`--force` available: every other blocker is a judgement somebody at the event may
+override, and an override is written into the tag message. Runbook, including
+what counts as a genuine emergency: [docs/freeze.md](docs/freeze.md).
+
 Data model and spreadsheet templates are documented in [README.md](README.md).
 Loading the real roster and schedule — the order, the tabs, and the two that
 reach nothing — is [docs/loading-data.md](docs/loading-data.md). Getting the
@@ -279,7 +307,7 @@ links to people is [docs/distributing-links.md](docs/distributing-links.md).
 ## Current state
 
 Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13, 14, 19,
-20, 22, 23 and 28 are done. Item 21's accessibility half is done and its hardware
+20, 22, 23, 27 and 28 are done. Item 21's accessibility half is done and its hardware
 half is a checklist in [docs/device-matrix.md](docs/device-matrix.md); items 24
 and 25 have their engineering done and their content half is a gap list in
 [docs/loading-data.md](docs/loading-data.md); item 26's tooling and script are
@@ -302,7 +330,9 @@ everything else, every access link knows who it is addressed to and refuses to
 guess when it does not, the weekend prints onto paper that cannot disagree with
 the phones, "did every phone get that?" is a number on the panel rather than
 fifteen people being asked, a rehearsal against placeholder data is refused by
-name rather than passing quietly, and 562 tests run in CI.
+name rather than passing quietly, the release that goes to the venue is tagged
+behind a gate and the machine can be asked whether it is holding it, and 602
+tests run in CI.
 
 Still not true: **nothing is actually deployed** — item 22 built the config, the
 guardrails and the runbook, but `fly deploy` needs an account and has not been

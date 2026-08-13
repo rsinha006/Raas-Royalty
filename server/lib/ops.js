@@ -5,6 +5,7 @@ import os from 'node:os';
 import { dataDir, scheduleUpdatedAt } from '../db.js';
 import { CLIENT_DIST } from './deploy-config.js';
 import { backupStatus } from './backup.js';
+import { releasePayload } from './release.js';
 
 /**
  * Error tracking, alerting and the health check — PLAN.md item 23.
@@ -347,6 +348,18 @@ export function healthReport({ clientDist = CLIENT_DIST, serveClient = true } = 
     uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
     checks,
     backups,
+    /**
+     * Item 27. Reported, never fatal — a machine that cannot name its release
+     * is serving 280 people perfectly well, and 503ing over it would take the
+     * event down to fix a labelling problem.
+     *
+     * It is here rather than only in the panel because this is the endpoint
+     * reachable from outside without a password: `npm run freeze -- --url …`
+     * asks it whether the machine is holding the release that was frozen, and
+     * that comparison needs the half that the laptop cannot know. Memoized in
+     * release.js — this path stays at one indexed row.
+     */
+    release: releasePayload(),
     at: new Date().toISOString(),
   };
 }
@@ -360,6 +373,7 @@ export function resetHealthCache() {
 export function opsSnapshot() {
   const config = opsConfig();
   return {
+    release: releasePayload(),
     backups: backupStatus(),
     errors: { ...errorStats(), recent: recentErrors(20) },
     alerts: {

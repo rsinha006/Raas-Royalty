@@ -62,6 +62,30 @@ COPY --from=build /app/client/dist ./client/dist
 # Runs as root so it can write to the mounted volume, which Fly presents
 # root-owned. The process is behind the platform proxy and holds no shell.
 
+# ---------------------------------------------------------------------------
+# Which release is this? — PLAN.md item 27.
+#
+# ⚠️ These arguments are the *only* way the running machine can name what it is
+# running. `.git/` is in .dockerignore — deliberately, because an image gets
+# pushed to a registry — so there is no repository in here to interrogate and no
+# honest runtime fallback. A plain `fly deploy` produces a machine that answers
+# "unknown", which is the correct answer and a useless one.
+#
+#   npm run freeze          prints the fly deploy line with these filled in
+#   docs/freeze.md          why the freeze depends on it
+#
+# Last in the stage on purpose: they change on every build, and anything below
+# an ENV that changes is rebuilt. Here they invalidate nothing.
+# ---------------------------------------------------------------------------
+ARG RELEASE=""
+ARG RELEASE_COMMIT=""
+ARG RELEASE_BUILT_AT=""
+ARG RELEASE_DIRTY=""
+ENV RELEASE=$RELEASE \
+    RELEASE_COMMIT=$RELEASE_COMMIT \
+    RELEASE_BUILT_AT=$RELEASE_BUILT_AT \
+    RELEASE_DIRTY=$RELEASE_DIRTY
+
 EXPOSE 8080
 
 # No init shim: server/index.js installs its own SIGTERM handler, which is what

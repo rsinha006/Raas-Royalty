@@ -85,6 +85,11 @@ fly secrets set PUBLIC_BASE_URL="https://royalty-schedule.fly.dev"
 fly deploy --ha=false
 ```
 
+⚠️ From the freeze onwards, deploy the line `npm run freeze` prints instead —
+it carries `--build-arg RELEASE=…`, which is the only way the running machine
+can name the release it is holding. `.git/` is in `.dockerignore`, so there is
+no repository in the image to ask. See [freeze.md](freeze.md).
+
 **6. Seed the database.** The volume starts empty, and the schema and
 migrations build themselves on first boot but the roster does not. This runs
 **on the machine**, because that is where the volume is:
@@ -115,11 +120,17 @@ fly status                                        # one machine, state "started"
 fly ssh console -C "npm run preflight"            # every check passing
 curl -si https://<host>/api/health                # 200 {"ok":true,...}; 503 = up, not serving
 curl -si http://<host>/ | head -1                 # 301 to https
+npm run freeze -- --check --no-verify --url https://<host>   # is it the release you froze?
 ```
 
 `npm run preflight` **on the machine** is the one that counts. Run locally it
 reads your laptop's `.env`, which tells you nothing about what `fly secrets`
 holds.
+
+The last one is the opposite: it has to run **from the repository**, because it
+compares the tag on this side against what the machine reports on the other.
+A machine that answers `unknown` was built without the release build args —
+correct in every other way, and impossible to tell apart from any other build.
 
 Then, in a browser:
 
@@ -177,7 +188,10 @@ misconfiguration.
 ## Deploying during the event
 
 Item 27 freezes on the Wednesday, so this should be for genuine emergencies
-only.
+only — and the procedure for one, including what qualifies, is
+[freeze.md](freeze.md). Do not improvise it from this page: an emergency change
+that ships without a tag leaves a machine nobody can identify, which is worse
+than the bug it fixed.
 
 A deploy **restarts the one machine**, so there are a few seconds of downtime.
 That is as good as it gets with a single volume — there is no second machine to

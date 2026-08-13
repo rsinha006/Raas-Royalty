@@ -19,7 +19,19 @@ interface Snapshot {
   modified: string;
 }
 
+/** Item 27: what this server was built from, if it can say. */
+interface Release {
+  release: string | null;
+  commit: string | null;
+  builtAt: string | null;
+  dirty: boolean | null;
+  source: 'env' | 'git' | 'unknown';
+  known: boolean;
+  frozen: boolean;
+}
+
 interface OpsData {
+  release: Release;
   backups: {
     enabled: boolean;
     intervalMs: number;
@@ -182,7 +194,7 @@ export default function OpsPanel() {
 
   if (!data) return <Loading label="Loading ops…" />;
 
-  const { backups, errors, alerts, heartbeat } = data;
+  const { release, backups, errors, alerts, heartbeat } = data;
 
   const takeBackup = async () => {
     setBusy('backup');
@@ -227,6 +239,62 @@ export default function OpsPanel() {
           <span>{notice.text}</span>
         </div>
       )}
+
+      {/* Item 27. Read first: everything below is a fact about *this* server,
+          and the freeze is a promise about which server that is. */}
+      <div className="card">
+        <h3>Release</h3>
+        <p className="small muted">
+          What this machine is running. The week before the event the code is frozen and tagged, so
+          the answer here should be that tag and stay it — a version that changed without anybody
+          deciding to change it is the first thing to establish when something looks wrong.
+        </p>
+
+        <div className="list-row">
+          <div>
+            <div className="label">
+              {release.known ? (
+                <>
+                  {release.release}
+                  {release.commit && release.commit !== release.release && (
+                    <span className="muted"> · {release.commit}</span>
+                  )}
+                </>
+              ) : (
+                'Unknown'
+              )}
+            </div>
+            <div className="sub">
+              {release.known
+                ? (release.frozen ? 'A frozen release' : 'An untagged build') +
+                  (release.builtAt ? `, built ${formatDateTime(release.builtAt)}` : '') +
+                  (release.source === 'git' ? ', read from the repository beside it.' : '.')
+                : 'This build was not stamped with a release, so nothing can tell it from any other.'}
+            </div>
+          </div>
+        </div>
+
+        {!release.known && (
+          <div className="banner info" style={{ marginTop: 10 }}>
+            <span aria-hidden="true">⚠️</span>
+            <span>
+              There is no repository inside the deployed image to ask, so the release has to be
+              built in. Redeploy with the <code>--build-arg</code> line that{' '}
+              <code>npm run freeze</code> prints — see <code>docs/freeze.md</code>.
+            </span>
+          </div>
+        )}
+
+        {release.dirty && (
+          <div className="banner info" style={{ marginTop: 10 }}>
+            <span aria-hidden="true">⚠️</span>
+            <span>
+              This build was made from a working tree with uncommitted changes, so the commit above
+              does not describe what is running. Nothing can reproduce it.
+            </span>
+          </div>
+        )}
+      </div>
 
       {/* Item 26. The rehearsal's central question — "did every phone get
           that?" — otherwise gets answered by asking fifteen people, and a phone

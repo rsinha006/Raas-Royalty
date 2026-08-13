@@ -21,7 +21,7 @@ otherwise the reasoning is lost between sessions and gets re-litigated.
 npm install && npm run seed && npm run build && npm start   # http://localhost:4000
 npm run dev          # hot reload: client :5173, API :4000
 npm run seed:reset   # rebuild placeholder data from scratch
-npm test             # 539 tests
+npm test             # 562 tests
 npm run ci           # what CI runs: the client typecheck and build, then the tests
 npm run codes -- --list   # every live access code and its subject
 npm run days              # the four event days; --friday YYYY-MM-DD moves them all
@@ -32,6 +32,7 @@ npm run preflight         # the production config checks, against this environme
 npm run backup            # a verified snapshot now; --list shows what is kept
 npm run restore           # what is available to restore; --yes replaces the database
 npm run callsheets        # the printed fallback pack; --check reports who it misses
+npm run rehearsal         # can a dress rehearsal answer its own question? --check exits 1
 ```
 
 Deploying is Fly.io, one machine, one volume — [docs/deploy.md](docs/deploy.md).
@@ -62,13 +63,15 @@ React/Vite bundle from `client/dist`. No external services.
 - `server/lib/backup.js` — verified snapshots, retention, the off-box copy
 - `server/lib/ops.js` — error capture, alerts, the heartbeat, `/api/health`
 - `server/lib/call-sheets.js` — the printed fallback pack, and what it leaves out
+- `server/lib/presence.js` — which phones are connected, and what version each holds
+- `server/lib/readiness.js` — whether a rehearsal against this data would mean anything
 - `server/sync/` — the import pipeline
 - `client/sw.js` — the offline shell, emitted by `client/vite-plugin-sw.js`
 - `client/src/tabstrip.ts` — the one ARIA tabs implementation, used by all four
 - `client/src/viewer/` — the participant app
 - `client/src/admin/` — the logistics panel
 
-Fourteen things worth knowing before changing anything:
+Fifteen things worth knowing before changing anything:
 
 **Block targets are four-way, and the fourth is not like the others.** A block
 targets a team, a person, a role, or `everyone` — the announcement audience,
@@ -245,6 +248,29 @@ live credential; there is a test that no code reaches the handout pack. Coverage
 because both are silent everywhere else. Guide:
 [docs/admin-guide.md](docs/admin-guide.md).
 
+**A green rehearsal against the placeholder is indistinguishable from a real
+one.** Dates that have already happened, six example roster rows and two
+entirely empty days all render as a perfectly ordinary schedule, and every test
+in this repo passes against them — so item 26's gate asks the questions nothing
+else does: are the dates real and still ahead of us (checked against the *venue's*
+today), did the schedule come from an import or from the seed (`source = 'seed'`
+is provenance, not a headcount guess), and does every event day have anything on
+it. ⚠️ Everything else it reports it **composes** — `deploy-config.js`,
+`access-codes.js` + `distribution.js`, `call-sheets.js`, `backup.js` — because
+four readiness checks that agree with each other and disagree with the code they
+describe is worse than none. Note the trap in `deploy-config.js`'s shape: a
+check's `level` is the severity it carries *if* it fails and `ok` is the result,
+so `failing(checks, …)` is the accessor and `level === 'fail'` is a gate that can
+never be green. The other half of item 26 is `presence.js`: each viewer reports
+the `updatedAt` it is rendering, ⚠️ compared against `versionForTargets` for that
+socket's *own* targets — a comparison against `scheduleUpdatedAt()` would mark
+all fifteen phones in a room behind the moment any one team changed. Three
+states, not two: a phone that has never reported is *silent*, and calling that
+"up to date" is the comfortable lie. ⚠️ Admin sockets are panels even when they
+resolve to a viewer subject — cookies are per browser, so the rehearsal driver's
+own laptop otherwise sits in the list as a phone that never updates. Script:
+[docs/dress-rehearsal.md](docs/dress-rehearsal.md).
+
 Data model and spreadsheet templates are documented in [README.md](README.md).
 Loading the real roster and schedule — the order, the tabs, and the two that
 reach nothing — is [docs/loading-data.md](docs/loading-data.md). Getting the
@@ -256,8 +282,9 @@ Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13, 14
 20, 22, 23 and 28 are done. Item 21's accessibility half is done and its hardware
 half is a checklist in [docs/device-matrix.md](docs/device-matrix.md); items 24
 and 25 have their engineering done and their content half is a gap list in
-[docs/loading-data.md](docs/loading-data.md) — see [PLAN.md](PLAN.md) for what
-each one settled. In short: the viewer is behind
+[docs/loading-data.md](docs/loading-data.md); item 26's tooling and script are
+built and the rehearsal itself needs people and real data — see
+[PLAN.md](PLAN.md) for what each one settled. In short: the viewer is behind
 access codes enforced server-side, event times are resolved against the venue's
 timezone by the server, changes reach only the people they affect, each person's
 "last updated" is their own, concurrent admin edits are refused rather than
@@ -273,7 +300,9 @@ data is copied off the machine every few minutes and verified on the way out,
 the event's own sixteen-tab workbook loads through the same pipeline as
 everything else, every access link knows who it is addressed to and refuses to
 guess when it does not, the weekend prints onto paper that cannot disagree with
-the phones, and 539 tests run in CI.
+the phones, "did every phone get that?" is a number on the panel rather than
+fifteen people being asked, a rehearsal against placeholder data is refused by
+name rather than passing quietly, and 562 tests run in CI.
 
 Still not true: **nothing is actually deployed** — item 22 built the config, the
 guardrails and the runbook, but `fly deploy` needs an account and has not been

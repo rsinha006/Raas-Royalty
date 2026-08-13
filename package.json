@@ -24,7 +24,8 @@
     "load-test": "node scripts/load-test.js",
     "test": "node --test tests/*.test.js",
     "ci": "npm run build && npm test",
-    "postinstall": "npm --prefix client install"
+    "postinstall": "npm --prefix client install",
+    "rehearsal": "node scripts/rehearsal.js"
   },
   "dependencies": {
     "better-sqlite3": "^12.2.0",

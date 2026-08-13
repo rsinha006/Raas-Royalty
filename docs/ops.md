@@ -202,7 +202,9 @@ same reason.
 - [ ] `npm run backup` on the machine puts a copy at the off-box target, and
       the copy is visible from wherever that is.
 - [ ] A restore has been *performed*, not read: at the dress rehearsal, on the
-      rehearsal data.
+      rehearsal data. The drill is step 3.5 of
+      [dress-rehearsal.md](dress-rehearsal.md), with the timings it produced on
+      a laptop — re-time it on the machine, because a Fly volume is not an SSD.
 - [ ] `fly machine stop` produced an SMS to the on-call person's phone.
 - [ ] **Send a test** in the Ops tab arrived where someone will see it.
 - [ ] The on-call person from item 28 knows the restore sequence above and has
@@ -213,9 +215,11 @@ same reason.
 
 ## Still open
 
-- **No automated restore drill.** The round trip is covered by tests
-  (`tests/backup.test.js`), but nothing rehearses the full stop-restore-start
-  sequence on a real machine. That is item 26's job.
+- **The restore drill is written down but has only been run on a laptop.** The
+  round trip is covered by tests (`tests/backup.test.js`) and the full
+  stop-restore-start sequence is step 3.5 of
+  [dress-rehearsal.md](dress-rehearsal.md), timed on the dev database. What is
+  still missing is running it on the machine, which needs the machine to exist.
 - **Off-box retention is whatever the target does.** Nothing here prunes it, and
   nothing here checks the copies are arriving — the shipped-at timestamp in the
   panel says the request was accepted, not that a file is readable at the other

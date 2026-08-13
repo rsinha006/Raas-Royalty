@@ -1542,3 +1542,111 @@ this means stopping for twenty minutes.
 
 ⚠️ **The blank is deliberate.** A desk sheet that omits the section when nobody
 is set reads as finished; a ruled line with "NOT SET" on it gets filled in.
+
+---
+
+## Readiness is a gate that composes other checks, and refuses on the event's content
+
+**Date:** 2026-08-13 · **Status:** decided
+
+**Question.** Item 26 says "real data, 10–15 people, break things". How do you
+know, on the morning, that the rehearsal is worth running?
+
+**Decision.** One command — `npm run rehearsal`, mirrored at **Ops → Event
+readiness**. It *composes* `deploy-config.js`, `access-codes.js` +
+`distribution.js`, `call-sheets.js` and `backup.js` rather than re-implementing
+any of them, and adds exactly three checks of its own: the dates, the roster's
+provenance, and whether every event day has anything on it. Three levels —
+`blocker`, `warn`, `ok` — and only a blocker exits non-zero.
+
+**Why.** The thing this exists to prevent is specific: **a green rehearsal
+against the placeholder is indistinguishable from a green one against the
+weekend.** Every code resolves, every phone updates, every colour is right, and
+nobody who will actually be there is in the database. All 539 tests passed
+against a database whose event had finished four days earlier.
+
+The three new checks are the ones with no other home:
+
+- **The dates**, compared against the *venue's* today. Nothing in this app had
+  ever asked whether the event had already happened — item 9 made the timezone
+  authoritative, item 24 made the dates movable, and neither could notice a
+  weekend in the past. It also refuses a date that is not the weekday it claims
+  to be and a non-contiguous weekend, which `npm run days` will not write but a
+  hand-run SQL fix at 2am would.
+- **The roster, by provenance rather than by headcount.** There is no honest
+  number to test against — hard-coding one fails a legitimately small event and
+  passes a half-loaded big one. Seed rows carry `source = 'seed'` and an import
+  does not, so "every block came from the seed" is a fact about this database.
+- **A day with no blocks.** Item 24's standing gap: `Export` builds Saturday
+  from the pipelines and the other three days come from Manual Blocks. Somebody
+  landing on an empty Thursday sees a blank day, and nothing in the import says
+  so, because every row that was there imported perfectly.
+
+**Composing rather than duplicating is the load-bearing part.** Four readiness
+checks that agree with each other and disagree with the code they describe is
+strictly worse than no gate at all, because the whole value is being believed at
+7am on the day. ⚠️ Note the shape of a `deploy-config.js` check while doing it:
+`level` is the severity it carries *if* it fails and `ok` is the result, so
+`failing(checks, …)` is the accessor — the first cut read `level === 'fail'` as
+"failed" and produced a gate that could never be green.
+
+**Three levels, not two,** because the rehearsal is scheduled at T-1 week and
+the roster habitually lands later. A gate that cannot tell "no real dates" from
+"no off-box backup target" gets ignored wholesale, and then so does the blocker.
+
+**Rejected:** having it fix anything. It is read-only on purpose — the fixes are
+`npm run days`, an import, and a spreadsheet, all of which are somebody's
+decision.
+
+---
+
+## A phone reports the version it is showing, and it is compared against its own targets
+
+**Date:** 2026-08-13 · **Status:** decided
+
+**Question.** The dress rehearsal's central sentence is "make live changes and
+confirm every phone updates". With fifteen phones in a room, how?
+
+**Decision.** Each viewer emits `viewer:held` with the `updatedAt` it is
+rendering, after every successful fetch and on every reconnect. The server keeps
+that in memory per socket (`presence.js`) and compares it against
+`versionForTargets` for **that socket's own targets**. Admin-only, at
+`Ops → Phones connected`.
+
+**Why.** The alternative is asking the room, and a phone quietly holding a
+twenty-minute-old time answers *yes* — its owner cannot tell either, because a
+stale schedule looks exactly like a correct one. That is this project's defining
+failure mode, and it was the one thing the rehearsal had no instrument for. Item
+20 measured 600 simulated phones; nothing had ever measured a real one.
+
+⚠️ **Against its own targets, never against the event's.** `updatedAt` has been
+per-subject since item 14 — a viewer's is the newest of the targets they hold —
+so comparing every phone against `scheduleUpdatedAt()` would mark all fifteen
+behind the instant any one team changed. An alarm that is always ringing is the
+same as no alarm. There is a test that fails against that implementation.
+
+**A phone reports its own state, because nothing else can.** A server-side
+inference ("we emitted to that room, so they have it") is exactly the false
+confidence this removes: the emit is the thing that might not have arrived.
+
+**Three states, not two.** `silent` — never reported — is neither up to date nor
+behind. Calling it current is the comfortable lie; calling it stale would flag
+every phone for the second between connecting and its first fetch.
+
+⚠️ **An admin socket is a panel even when it resolves to a viewer subject.**
+Cookies are per browser, not per tab, so the person driving the rehearsal has
+the panel and a viewer link open in the same browser and their `/admin` socket
+identifies as a real participant. Classifying by subject first put a
+permanently silent phone in the list belonging to somebody standing in the room.
+Found by opening both, which is the only configuration this is ever used in.
+
+**Nothing is persisted, and nothing touches `/api/schedule`.** The registry is
+memory and starts empty on a restart — "was Priya connected on Friday" is not a
+question this answers. Reporting rides the socket that is already open, and the
+report is computed only when an admin asks, so the fan-out ceiling in
+`queries.js` is untouched.
+
+**Rejected: inferring presence from request logs.** It would survive restarts
+and need no client change, but it answers "did this phone ask recently", not
+"what is on its screen" — and those differ in exactly the case that matters, a
+socket that dropped and a client that has stopped refetching.

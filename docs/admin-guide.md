@@ -7,6 +7,11 @@ The runbooks it sits on top of: [ops.md](ops.md) when the app itself is wrong,
 [deploy.md](deploy.md) for the machine, [loading-data.md](loading-data.md) for
 the spreadsheet, [distributing-links.md](distributing-links.md) for the links.
 
+**Read this before the dress rehearsal** — [dress-rehearsal.md](dress-rehearsal.md)
+ends by handing you the laptop and asking you to answer "I don't see my warm-up"
+with no help. That is the point at which this page is either good enough or is
+not, and there is a week left to fix it.
+
 ---
 
 ## The three facts
@@ -31,6 +36,7 @@ the spreadsheet, [distributing-links.md](distributing-links.md) for the links.
 | **One block moved** | Edit it in **Schedule**. If someone else edited it while your form was open, you get a conflict banner rather than a silent overwrite — reload the block and redo your change. |
 | **"Fire alarm, evacuate"** | **Schedule → new block → target Everyone.** One block, every phone, including people who have not tapped their name yet. |
 | **"I don't see my warm-up"** | **View as** their name. It shows their schedule *and* why: the targets their query matches, and how they sign in. Four different answers, four different fixes — the panel names which. |
+| **"Did everyone get that?"** | **Ops → Phones connected.** One row per screen that is open, and whether it is showing the current version *of that person's own schedule*. Do not ask the room — a phone holding a twenty-minute-old time looks exactly like one that is right, to its owner as much as to you. |
 | **"I lost my link"** | See the desk script below. |
 
 **Undo is per action, not per block.** A shift of 18 blocks is one entry and

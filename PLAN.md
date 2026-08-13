@@ -14,10 +14,12 @@ competition weekend. **Read this at the start of every session.**
 ## Where things stand
 
 **Done: Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13,
-14, 19, 20, 22, 23 and 28. Items 21, 24 and 25 are half done** — item 21's
+14, 19, 20, 22, 23 and 28. Items 21, 24, 25 and 26 are half done** — item 21's
 accessibility and responsive pass has landed and its hardware checks are open;
 items 24 and 25 turned out to have real engineering in them, which is done, and
-what remains of both is the roster itself. Last updated 2026-08-12.
+what remains of both is the roster itself; item 26's tooling and script are
+built and the rehearsal itself needs a room full of people. Last updated
+2026-08-13.
 
 - The viewer is **behind access codes**, enforced server-side, with the roster
   no longer enumerable. Codes are managed and exported from the admin panel.
@@ -65,7 +67,14 @@ what remains of both is the roster itself. Last updated 2026-08-12.
   desk index that answers "I lost my link" without a laptop. The handout pack
   carries no access codes and the desk index does, which is why they are two
   documents.
-- **539 tests run in CI**, covering authorization negatives, timezone and DST,
+- **A rehearsal knows whether it means anything, and a change knows whether it
+  landed.** `npm run rehearsal` refuses a run against dates that have already
+  happened, a schedule made of seed rows, or a day with nothing on it — the
+  placeholder passes every other test in this repo. And **Ops → Phones
+  connected** answers "did everyone get that?" from the sockets rather than from
+  asking the room, per subject rather than against the event's clock. The
+  restore drill has been performed and timed.
+- **562 tests run in CI**, covering authorization negatives, timezone and DST,
   code management, the schema migrations, broadcast scoping, the item 14
   correctness gaps, the bulk shift, the offline shell, preview fidelity,
   everything undo refuses, the announcement target, the measured colour
@@ -73,8 +82,9 @@ what remains of both is the roster itself. Last updated 2026-08-12.
   pack's fidelity to the phones and the codes it must never carry, the import
   pipeline — including last year's real spreadsheets, which the importer has to
   refuse without moving the schedule — the event template's own tabs and
-  columns, so a renamed one is a red build, and the rule that no shared contact
-  card can ever become a link recipient.
+  columns, so a renamed one is a red build, the rule that no shared contact
+  card can ever become a link recipient, and — new — the per-subject comparison
+  behind "is this phone up to date" and every way the readiness gate refuses.
 - **The app is usable by someone who cannot see it.** Headings, landmarks and a
   real list where there were only `div`s; every colour measured against AA
   rather than eyeballed; one keyboard tab pattern instead of four broken ones;
@@ -89,14 +99,18 @@ The open decisions are all resolved (see below); item 12 was reshaped by them.
 **Not yet true of this project:** nothing is deployed *yet* — item 22 built the
 config, the guardrails and the runbook, but the `fly deploy` itself needs an
 account and has not been run, so item 23's backup target, heartbeat and alert
-webhook are configured-for rather than pointed at anything. And no real data.
+webhook are configured-for rather than pointed at anything. And no real data —
+which `npm run rehearsal` now says out loud, in the form of four blockers.
 
 **Next up: the rest of items 24 and 25, which are one people problem** — the
 real dates, ~80 staff and ~200 dancers into the template with an address each,
 and Thursday/Friday/Sunday onto Manual Blocks. Both engineering halves are built
 and demonstrated; [docs/loading-data.md](docs/loading-data.md) and
 [docs/distributing-links.md](docs/distributing-links.md) are the runbooks and
-the gap list. Phase F is built — what is left in it is running
+the gap list. **Item 26 now says the same thing in one command**: `npm run
+rehearsal` lists exactly what is missing before a rehearsal would be worth
+running, and today the answer is the dates, the roster and two empty days. Phase
+F is built — what is left in it is running
 `fly deploy` with an account, and pointing the three item 23 secrets at real
 services ([docs/ops.md](docs/ops.md)). Item 21's remaining half needs phones in
 hands, not code — run [docs/device-matrix.md](docs/device-matrix.md) before the
@@ -1486,12 +1500,76 @@ has a mailing tool and a half-built sender is one more thing to be on call for.
 And the file is only as good as the roster in it, so this waits on item 24's
 content half like everything else.
 
-### 26. `[ ]` Full dress rehearsal — T-1 week
+### 26. `[~]` Full dress rehearsal — T-1 week
 
 Real data, 10–15 people on their own phones, in the venue if possible. Make live
 changes and confirm every phone updates. Then deliberately break things: kill
 the server, kill the wifi, revoke a code, delete a team. This is where you find
 what this plan missed.
+
+**The rehearsal itself needs people, phones and real data. What was missing was
+everything that makes it runnable and its result believable** — built and
+demonstrated 2026-08-13: `server/lib/readiness.js`, `server/lib/presence.js`,
+`scripts/rehearsal.js`, two admin routes, two Ops cards, and 23 new tests
+(`tests/rehearsal.test.js`, 562 total). The script is
+[docs/dress-rehearsal.md](docs/dress-rehearsal.md).
+
+```bash
+npm run rehearsal              # can the rehearsal answer its own question?
+npm run rehearsal -- --check   # quiet; exits 1 on a blocker
+```
+
+- ⚠️ **A green rehearsal against the placeholder is indistinguishable from a
+  green one against the weekend**, and that is the failure this item was most
+  likely to end in. Dates that have already happened, six example roster rows
+  and two entirely empty days all render as a perfectly ordinary schedule, and
+  every one of the other 539 tests passes against them. So the gate asks the
+  three questions nothing else does — are the dates real and still ahead of us,
+  did the schedule come from an import or from the seed, does every day of the
+  weekend have anything on it — and refuses by name rather than passing quietly.
+- **The dates check is the one this project has needed since item 9.** Nothing
+  anywhere asked whether the event had already happened; the placeholder went
+  into the past on 2026-08-11 and no screen, script or test said a word. It is
+  compared against *the venue's* today, refuses a date that is not the weekday
+  it claims to be, and refuses a non-contiguous weekend — the two `npm run days`
+  will not write but a hand-run SQL fix at 2am would.
+- ⚠️ **Everything else it reports it composes rather than re-implements** —
+  `preflight`, `codes --check`, `callsheets --check`, the snapshot verifier.
+  Four readiness checks that agree with each other and disagree with the code
+  they describe is worse than having none, because the point is to be believed
+  on the morning of the rehearsal.
+- ⚠️ **"Did every phone get that?" is now a number.** With fifteen people in a
+  room the only way to answer it was to ask them, and a phone quietly holding a
+  twenty-minute-old time answers *yes* — its owner cannot tell either. Each
+  viewer now reports the `updatedAt` it is rendering, compared server-side
+  against `versionForTargets` for **that socket's own targets**. A comparison
+  against the global timestamp would mark all fifteen behind the moment any one
+  team changed; there is a test that fails against exactly that.
+- **Three states, not two.** A phone that has never reported is *silent* —
+  calling it up to date is the comfortable lie, calling it behind would flag
+  every phone for the second between connecting and its first fetch.
+- ⚠️ **The panel is a panel even when it resolves to a viewer.** Found by
+  opening both, which is the only configuration this is ever used in: cookies
+  are per browser, so the rehearsal driver's `/admin` socket carries their
+  viewer cookie and was listed as a phone that never updates — a permanently
+  red row belonging to somebody standing in the room.
+- **The restore drill has been run, not just written.** Snapshot → destroy →
+  dry run → restore → restart → magic link, timed: 0.18s, 0.11s, verify 4ms on
+  the 166-person dev database. The clock that matters is none of those; it is
+  deciding to do it and stopping the server, which is minutes and belongs to one
+  named person. Re-time on the machine once there is one — `docs/ops.md`'s "no
+  automated restore drill" is now "not yet run on the machine".
+
+**Demonstrated, not just implemented.** Four phones on three teams plus a staff
+member, against the real dev database through the real routes: an edit to
+Momentum moved that phone to the new version and left the other three reading
+*up to date* on the old one — which is the per-subject property, visible.
+Freezing one phone's process and editing its team put exactly one row into
+*behind* and moved nothing else; resuming it went green on its own.
+
+**Still open — the rehearsal, which is people:** ten to fifteen of them, their
+own phones, the venue, and real data in the database. Everything above only
+makes it possible to run and to believe.
 
 ### 27. `[ ]` Freeze on the Wednesday before
 
@@ -1582,7 +1660,9 @@ the 45 live codes.
 | An import silently empties the schedule | Closed — refused on "nothing importable came out" rather than on "rows failed", which is the case a formulas-only Export tab produced | 24 |
 | ~~A mail merge sends a dozen people's private links to one inbox~~ | Closed — recipients come from `people.email` and never from a contact card, which is shared by a whole team; a test mails nothing to a shared card | 25 |
 | Links go out and nobody opens them | Half closed — the panel counts never-used, and `--check` fails when a link has no recipient. Nothing confirms delivery, and nothing sends: the merge is somebody's mailing tool. The desk index means an unopened link is a 10-second fix at check-in rather than a search | 25, 28 |
-| Airport runs and the day grids never reach a phone | Open — `Export` reads from neither, so both look complete and change nothing. Documented in `docs/loading-data.md`; nothing in the workbook says so | 24, 26 |
+| Airport runs and the day grids never reach a phone | Half closed — `Export` reads from neither, so both look complete and change nothing, and nothing in the workbook says so. But an event day with no blocks on it is now a blocker in `npm run rehearsal`, which is the shape this failure takes: Thu and Sun empty. Documented in `docs/loading-data.md` | 24, 26 |
+| A rehearsal against placeholder data passes and proves nothing | Closed — the gate refuses on dates that have already happened, a schedule made of seed rows, and an empty event day, and names what to fix. It is the same report in the panel and on the command line | 26 |
+| A phone silently stops updating and nobody can tell | Closed for anyone watching the panel — each viewer reports the version it is rendering and `Ops → Phones connected` compares it against that person's own targets. ⚠️ A phone with the app *closed* does not appear at all, which is normal and is why the count is read against the room rather than against the roster | 26 |
 | ~~Late schema change forces rework~~ | Closed — model confirmed against past-year data, and applied in item 13 with a migration that runs on boot | 2, 3, 13 |
 | Real roster still not in hand | A people problem, not an engineering one — it was due at T-6 and is the likeliest thing to slip past the rehearsal. The loading path is now built and demonstrated, so this is the only thing between here and a real schedule | 24 |
 | The event dates are still a placeholder, and it is now in the past | `npm run days` moves the whole weekend from one date and refuses a wrong weekday. The mechanism exists; the number is the event director's | 24 |
@@ -1592,7 +1672,8 @@ the 45 live codes.
 | Scaling to a second machine silently forks the database | Half-closed — `--ha=false`, `min_machines_running = 1`, a test, and it is the first thing `docs/deploy.md` says. But nothing can *stop* `fly scale count 2`, so it stays a live risk during event week | 22 |
 | Printed paper is acted on after it goes stale | Half closed — every page is stamped with the time it was printed and says the phone wins, and the sheets come from the same query the phones run so they never start out disagreeing. Nothing stops somebody reading Thursday's copy on Saturday; saying it out loud when the app is down is in the guide | 28 |
 | A printed sheet leaks a code | Closed — the handout pack carries no access code at all and a test asserts it; the desk index is the only page that does, and it says on it not to be handed out | 28 |
-| Total app failure during the event | Half closed — verified snapshots every 5 minutes with an off-box copy, a tested restore script, health that fails when phones are not being served, an external dead-man's switch that pages someone, and a printed pack built from the same query the phones run. The targets are unset until the deploy exists, the restore drill is item 26, and nothing has actually been printed because the roster is not real | 23, 26, 28 |
+| Total app failure during the event | Half closed — verified snapshots every 5 minutes with an off-box copy, a tested restore script, health that fails when phones are not being served, an external dead-man's switch that pages someone, and a printed pack built from the same query the phones run. The restore drill has now been *performed* end to end and timed, and is step 3.5 of the rehearsal script. The targets are unset until the deploy exists, the drill has not been run on a real machine, and nothing has actually been printed because the roster is not real | 23, 26, 28 |
+| The event dates were never checked against today by anything | Closed — `npm run rehearsal` refuses a weekend that has already happened, a date that is not the weekday it claims to be, and a non-contiguous one, measured against the venue's today. Nothing in the app asked this before, which is why the placeholder sat four days in the past unremarked | 9, 24, 26 |
 | Unreadable on a real phone in a dark venue | Half closed — every colour is measured against AA and pinned by tests, and the screen is navigable by heading and by keyboard. The notch, the radio and the battery still need hardware | 21 |
 
 ---
@@ -1610,7 +1691,7 @@ the two that actually catch problems.
 | T-4 | Phase C (reliability core) — items 9 ✅, 10 ✅, 11 ✅, 13 ✅ and 14 ✅ done; only item 12 remains, and it waits on the template. |
 | T-3 | Phase D + E (admin tooling, tests, load test) — Phase D ✅, item 19 ✅ and item 20 ✅ done early; item 21's audit ✅. |
 | T-2 | Phase F (deploy, ops) — item 22 ✅ configured and item 23 ✅ built; both need the deploy actually run, and item 23's three secrets pointed at real services. Plus item 21's device checks on real phones. |
-| T-1 | Items 24–26. Items 24 ✅ and 25 ✅ engineering done early; the roster and the dates are the gate for both. Dress rehearsal. |
+| T-1 | Items 24–26. Items 24 ✅, 25 ✅ and 26 ✅ engineering done early; the roster and the dates are the gate for all three. Dress rehearsal — script and readiness gate ready, needs the room. |
 | Event week | Items 27–28. Item 28 ✅ built early; what is left of it is naming the on-call and printing the pack. Freeze Wednesday. |
 | After | Retro. Export the edit log to see what actually changed and how often. |
 

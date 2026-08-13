@@ -27,6 +27,7 @@ import { scheduleUpdatedAt } from '../db.js';
 import { currentAdmin } from './auth.js';
 import { resolveViewerSession, scheduleSessionFor } from './viewer-auth.js';
 import { resolveSession } from './queries.js';
+import { bindLiveIds, forgetSocket, recordHeld, trackSocket } from './presence.js';
 
 /** Admins see the whole event, so they are in on every broadcast. */
 export const ADMIN_ROOM = 'admin';
@@ -156,21 +157,38 @@ export function parseCookieHeader(header) {
 }
 
 /**
- * The rooms a set of cookies entitles someone to. Re-derived from the database
- * every time it is called, not cached on the socket: a revoked code, a deleted
- * team, or a dancer moved between teams has to change what that socket hears,
- * and the socket may have been open since the Monday before.
+ * Who a set of cookies is, and therefore what they hear. Re-derived from the
+ * database every time it is called, not cached on the socket: a revoked code, a
+ * deleted team, or a dancer moved between teams has to change what that socket
+ * hears, and the socket may have been open since the Monday before.
+ *
+ * ⚠️ One derivation, two consumers. The rooms and the subject label come out of
+ * the same `resolveSession` call because `presence.js` reports "this phone is
+ * Priya, and it is holding a version 20 minutes old" — and a second derivation
+ * of who a socket belongs to would eventually disagree with the rooms it is
+ * actually in, which is the one thing that view of the room must never do.
  */
-export function roomsForCookies(cookies) {
-  const rooms = [];
-  if (currentAdmin({ cookies })) rooms.push(ADMIN_ROOM);
+export function identifyCookies(cookies) {
+  const admin = Boolean(currentAdmin({ cookies }));
+  const rooms = admin ? [ADMIN_ROOM] : [];
 
   const session = resolveViewerSession({ cookies });
-  if (session) {
-    const resolved = resolveSession(scheduleSessionFor(session));
-    rooms.push(...roomsForTargets(resolved?.targets));
-  }
-  return [...new Set(rooms)];
+  const resolved = session ? resolveSession(scheduleSessionFor(session)) : null;
+  if (resolved) rooms.push(...roomsForTargets(resolved.targets));
+
+  return {
+    admin,
+    /** Null for the panel and for anyone who has not signed in. */
+    subject: resolved
+      ? { type: resolved.subject.kind, id: resolved.subject.id, name: resolved.subject.name }
+      : null,
+    targets: resolved?.targets ?? [],
+    rooms: [...new Set(rooms)],
+  };
+}
+
+export function roomsForCookies(cookies) {
+  return identifyCookies(cookies).rooms;
 }
 
 /* ------------------------------------------------------------------ *
@@ -184,25 +202,41 @@ export function roomsForCookies(cookies) {
  */
 export function createLiveHub(io) {
   function syncRooms(socket) {
-    let wanted;
+    let identity;
     try {
-      wanted = new Set(roomsForCookies(parseCookieHeader(socket.handshake?.headers?.cookie)));
+      identity = identifyCookies(parseCookieHeader(socket.handshake?.headers?.cookie));
     } catch (err) {
       // A malformed cookie or a mid-query failure must not kill the socket: the
       // fallback is "hears nothing", and the HTTP layer still guards the data.
       console.warn('[live] could not resolve socket session:', err.message);
-      wanted = new Set();
+      identity = { admin: false, subject: null, targets: [], rooms: [] };
     }
+    const wanted = new Set(identity.rooms);
     for (const room of socket.rooms) {
       if (room !== socket.id && !wanted.has(room)) socket.leave(room);
     }
     for (const room of wanted) socket.join(room);
+    // Presence follows room membership rather than being maintained beside it,
+    // so a re-handshake, a roster edit and a revoked code all move both at once.
+    trackSocket(socket.id, identity);
     return [...wanted];
   }
+
+  bindLiveIds(() => new Set(io.sockets?.sockets?.keys?.() ?? []));
 
   io.on('connection', (socket) => {
     syncRooms(socket);
     socket.emit('hello', { updatedAt: scheduleUpdatedAt() });
+
+    /**
+     * What this client is currently rendering. The only message a viewer sends,
+     * and it carries nothing but a timestamp it was already given — see
+     * `presence.js` for why the server cannot work this out for itself.
+     */
+    socket.on?.('viewer:held', (payload) => {
+      recordHeld(socket.id, payload?.updatedAt);
+    });
+    socket.on?.('disconnect', () => forgetSocket(socket.id));
   });
 
   /** Every connected socket re-evaluated. Cheap: a few indexed lookups each. */

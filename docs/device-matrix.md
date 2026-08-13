@@ -87,6 +87,13 @@ At 375×812 and 320×568, signed in as a real captain against the seed data:
 **None of these can be settled in a desktop browser at a phone-sized viewport.**
 Run them on real devices before item 26, and record the result in this file.
 
+⚠️ Run them *before* the rehearsal, not during it. The rehearsal is a room full
+of people whose attention lasts about ninety minutes, and it is testing whether
+changes reach phones — not whether one phone renders a notch correctly. A
+hardware fault found there costs the room; found here it costs an evening. The
+rehearsal's own script is [dress-rehearsal.md](dress-rehearsal.md), and it asks
+for the phone model against every finding so the two files stay joined up.
+
 Minimum matrix — one row each, the two that matter most first:
 
 | Device | OS / browser | Owner | Date | Result |

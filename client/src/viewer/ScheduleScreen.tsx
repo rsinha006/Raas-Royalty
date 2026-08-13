@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiError } from '../api';
-import { useLive, useTicker } from '../live';
+import { reportHeld, useLive, useTicker } from '../live';
 import { cacheSchedule, readAnyCachedSchedule } from '../session';
 import type { Block, SchedulePayload } from '../types';
 import {
@@ -95,6 +95,9 @@ export default function ScheduleScreen({
       cacheSchedule(data);
       setStale(false);
       setError(null);
+      // Report what this screen is now showing, so the panel can answer
+      // "did every phone get that?" without asking everyone in the room.
+      reportHeld(data.updatedAt);
     } catch (err) {
       // 401 means the session died under us — most likely the code was revoked
       // mid-event. That needs the code screen, not an offline banner.

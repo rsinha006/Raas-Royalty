@@ -158,6 +158,33 @@ the **handout pack**, which carries no access codes, and a one-page **desk
 index**, which carries every code and stays behind the check-in desk. Also at
 **Admin → Ops → Printed fallback**.
 
+## Rehearsing it
+
+**[docs/dress-rehearsal.md](docs/dress-rehearsal.md)** is the script for the
+T-1-week run-through: real data, ten to fifteen people on their own phones, live
+changes, and then a list of things to break on purpose — the server, the wifi, a
+code, a team, and the restore.
+
+```bash
+npm run rehearsal              # can the rehearsal answer its own question?
+npm run rehearsal -- --check   # quiet; exits 1 on a blocker
+```
+
+⚠️ **The placeholder event passes every other test in this repo.** Dates that
+have already happened, a roster of nobody real and two entirely empty days all
+render as a perfectly ordinary schedule, so a rehearsal against them looks
+identical to one that proves something. That gate is what says which you are
+about to run; it composes `preflight`, `codes --check` and `callsheets --check`
+rather than re-deciding anything they already answer. Also at **Admin → Ops →
+Event readiness**.
+
+During the rehearsal — and during the event — **Admin → Ops → Phones connected**
+shows each open screen and whether it is holding the current version *of that
+person's own schedule*. ⚠️ Per subject, not the event's: since one team's edit
+does not move anybody else's "last updated", comparing against a global
+timestamp would report every phone in the room as behind whenever any team
+changed.
+
 ## Data model
 
 | Table | Notes |

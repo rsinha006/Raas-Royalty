@@ -73,6 +73,48 @@ interface CallSheetSummary {
   };
 }
 
+/** Item 26: who is connected, and what their screen is holding. */
+interface Presence {
+  at: string;
+  phones: {
+    id: string;
+    subjectType: string;
+    subjectId: string;
+    label: string;
+    connectedAt: string;
+    held: string | null;
+    current: string | null;
+    state: 'current' | 'stale' | 'silent';
+    reportedSecondsAgo: number | null;
+  }[];
+  teamsPresent: string[];
+  counts: {
+    phones: number;
+    current: number;
+    stale: number;
+    silent: number;
+    panels: number;
+    anonymous: number;
+  };
+}
+
+/** Item 26: the same report `npm run rehearsal` prints. */
+interface Readiness {
+  at: string;
+  baseUrl: string;
+  checks: {
+    key: string;
+    level: 'blocker' | 'warn' | 'ok';
+    title: string;
+    detail: string | null;
+    fix: string | null;
+    items: string[];
+  }[];
+  blockers: number;
+  warnings: number;
+  ready: boolean;
+}
+
 const mb = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`;
 
 /** "every 15s" / "every 5 min" — an interval under a minute rounded to minutes reads as 0. */
@@ -90,6 +132,8 @@ function ago(seconds: number | null): string {
 export default function OpsPanel() {
   const [data, setData] = useState<OpsData | null>(null);
   const [paper, setPaper] = useState<CallSheetSummary | null>(null);
+  const [presence, setPresence] = useState<Presence | null>(null);
+  const [readiness, setReadiness] = useState<Readiness | null>(null);
   const [busy, setBusy] = useState<'backup' | 'alert' | null>(null);
   const [notice, setNotice] = useState<{ kind: 'ok' | 'bad'; text: string } | null>(null);
 
@@ -104,6 +148,11 @@ export default function OpsPanel() {
     } catch {
       setPaper(null);
     }
+    try {
+      setReadiness(await api.get<Readiness>('/api/admin/ops/readiness'));
+    } catch {
+      setReadiness(null);
+    }
   }, []);
 
   useEffect(() => {
@@ -113,6 +162,23 @@ export default function OpsPanel() {
     const t = setInterval(load, 60_000);
     return () => clearInterval(t);
   }, [load]);
+
+  /**
+   * Presence polls far faster than the rest, because it is read during the one
+   * step where somebody has just pressed Save and is watching to see whether
+   * fifteen phones follow. A minute of lag there is the difference between an
+   * answer and a shrug.
+   */
+  useEffect(() => {
+    const pull = () =>
+      api
+        .get<Presence>('/api/admin/ops/presence')
+        .then(setPresence)
+        .catch(() => setPresence(null));
+    pull();
+    const t = setInterval(pull, 5_000);
+    return () => clearInterval(t);
+  }, []);
 
   if (!data) return <Loading label="Loading ops…" />;
 
@@ -161,6 +227,84 @@ export default function OpsPanel() {
           <span>{notice.text}</span>
         </div>
       )}
+
+      {/* Item 26. The rehearsal's central question — "did every phone get
+          that?" — otherwise gets answered by asking fifteen people, and a phone
+          quietly holding a twenty-minute-old time answers yes. */}
+      <div className="card">
+        <h3>Phones connected</h3>
+        <p className="small muted">
+          What each connected screen is currently showing, compared against what that person’s own
+          schedule says it should be. Press Save on a change and watch this go green — a phone that
+          stays behind is one nobody in the room can spot, because a stale schedule looks exactly
+          like a correct one.
+        </p>
+
+        {!presence ? (
+          <div className="list-row">
+            <div>
+              <div className="label">Not available</div>
+              <div className="sub">The panel could not reach the live channel.</div>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="list-row">
+              <div>
+                <div className="label">
+                  {presence.counts.phones === 0
+                    ? 'No phones connected'
+                    : `${presence.counts.current} of ${presence.counts.phones} up to date`}
+                </div>
+                <div className="sub">
+                  {presence.counts.stale > 0 && `${presence.counts.stale} behind · `}
+                  {presence.counts.silent > 0 && `${presence.counts.silent} not reporting · `}
+                  {presence.teamsPresent.length} team
+                  {presence.teamsPresent.length === 1 ? '' : 's'} represented ·{' '}
+                  {presence.counts.panels} panel{presence.counts.panels === 1 ? '' : 's'}
+                </div>
+              </div>
+            </div>
+
+            {presence.counts.phones > 0 && (
+              <div className="tablewrap" style={{ marginTop: 8 }}>
+                <table className="tmpl">
+                  <thead>
+                    <tr>
+                      <th>Who</th>
+                      <th>Showing</th>
+                      <th>Reported</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {presence.phones.map((p) => (
+                      <tr key={p.id}>
+                        <td>{p.label}</td>
+                        <td>
+                          {p.state === 'current'
+                            ? 'up to date'
+                            : p.state === 'stale'
+                              ? `behind — showing ${formatDateTime(p.held)}`
+                              : 'has not reported yet'}
+                        </td>
+                        <td>
+                          {p.reportedSecondsAgo === null ? '—' : ago(p.reportedSecondsAgo)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <p className="tiny faint" style={{ marginTop: 8 }}>
+              Nothing here is stored — it is the sockets that are open right now, and it starts
+              empty after a restart. A phone with the app closed does not appear at all, which is
+              the normal state for most of the weekend.
+            </p>
+          </>
+        )}
+      </div>
 
       <div className="card">
         <h3>Backups</h3>
@@ -389,6 +533,75 @@ export default function OpsPanel() {
           </p>
         )}
       </div>
+
+      {/* Item 26. Read before the rehearsal and again at the freeze: a green
+          rehearsal against the placeholder looks identical to a green one
+          against the weekend. */}
+      {readiness && (
+        <div className="card">
+          <h3>Event readiness</h3>
+          <p className="small muted">
+            Whether a rehearsal now would mean anything. The seed data passes every test this app
+            has — dates that have already happened, nobody real on the roster, and two empty days
+            all render as a perfectly ordinary schedule. Same report as{' '}
+            <code>npm run rehearsal</code>.
+          </p>
+
+          <div className="list-row">
+            <div>
+              <div className="label">
+                {readiness.ready
+                  ? readiness.warnings
+                    ? `Ready, with ${readiness.warnings} gap${readiness.warnings === 1 ? '' : 's'}`
+                    : 'Ready'
+                  : `${readiness.blockers} blocker${readiness.blockers === 1 ? '' : 's'}`}
+              </div>
+              <div className="sub">
+                {readiness.ready
+                  ? 'The rehearsal can run against this data.'
+                  : 'A rehearsal now would be a rehearsal of the placeholder.'}
+              </div>
+            </div>
+          </div>
+
+          <ul className="plainlist" style={{ marginTop: 8 }}>
+            {readiness.checks.map((c) => (
+              <li key={c.key} className="list-row">
+                <div>
+                  <div className="label">
+                    <span aria-hidden="true">
+                      {c.level === 'blocker' ? '✗' : c.level === 'warn' ? '!' : '✓'}
+                    </span>{' '}
+                    <span className="vh">
+                      {c.level === 'blocker' ? 'Blocker: ' : c.level === 'warn' ? 'Warning: ' : 'Passing: '}
+                    </span>
+                    {c.title}
+                  </div>
+                  {c.detail && <div className="sub">{c.detail}</div>}
+                  {c.items.slice(0, 4).map((item) => (
+                    <div className="sub" key={item}>
+                      · {item}
+                    </div>
+                  ))}
+                  {c.items.length > 4 && (
+                    <div className="sub">· …and {c.items.length - 4} more.</div>
+                  )}
+                  {c.fix && (
+                    <div className="tiny faint">
+                      Fix: <code>{c.fix}</code>
+                    </div>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          <p className="tiny faint" style={{ marginTop: 8 }}>
+            The rehearsal itself is <code>docs/dress-rehearsal.md</code> — the script, and the list
+            of things to break on purpose.
+          </p>
+        </div>
+      )}
 
       <div className="card">
         <h3>Errors</h3>

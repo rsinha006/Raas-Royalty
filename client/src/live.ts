@@ -12,6 +12,9 @@ import { useEffect, useRef, useState } from 'react';
  */
 let socket: Socket | null = null;
 
+/** The last version reported to the server — see `reportHeld`. */
+let held: string | null = null;
+
 export function getSocket(): Socket {
   if (!socket) {
     socket = io({
@@ -19,6 +22,17 @@ export function getSocket(): Socket {
       withCredentials: true,
       reconnectionDelay: 500,
       reconnectionDelayMax: 5000,
+    });
+    /**
+     * Re-report on every connect, not only after a fetch. The socket regularly
+     * finishes connecting *after* the first schedule lands, and the server
+     * forgets everything about a socket when it drops — so without this a phone
+     * that has been sitting on a correct schedule all afternoon reads as
+     * "silent" in the panel the moment its connection blips, which is the
+     * reading most likely to send somebody to fix a phone that is fine.
+     */
+    socket.on('connect', () => {
+      if (held) socket?.emit('viewer:held', { updatedAt: held });
     });
   }
   return socket;
@@ -38,6 +52,25 @@ export function resyncSession(): void {
   if (!socket) return;
   socket.disconnect();
   socket.connect();
+}
+
+/**
+ * Tell the server which version this screen is actually rendering.
+ *
+ * The one message this client sends, and it carries nothing the server did not
+ * just give us. It exists for the dress rehearsal and for event week: with
+ * fifteen phones in a room, "did everyone get that?" is otherwise answered by
+ * asking fifteen people, and a phone showing a twenty-minute-old time answers
+ * yes. See `server/lib/presence.js`.
+ *
+ * Deliberately fire-and-forget. It is reported after a *successful* fetch only
+ * — a screen rendering the offline cache has not got the change, and saying so
+ * would make the panel's count comfortably wrong.
+ */
+export function reportHeld(updatedAt: string | null | undefined): void {
+  if (!updatedAt) return;
+  held = updatedAt;
+  if (socket?.connected) socket.emit('viewer:held', { updatedAt });
 }
 
 export type LiveStatus = 'connecting' | 'live' | 'offline';

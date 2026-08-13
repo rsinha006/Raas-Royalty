@@ -10,7 +10,10 @@ import {
   takeSnapshot,
 } from '../lib/backup.js';
 import { notify, opsSnapshot, resetAlertWindow } from '../lib/ops.js';
+import { presenceReport } from '../lib/presence.js';
+import { readinessReport } from '../lib/readiness.js';
 import { editorName } from '../lib/auth.js';
+import { publicBaseUrl } from './admin-codes.js';
 
 /**
  * The Ops tab — item 23's half of the panel.
@@ -86,6 +89,31 @@ export function adminOpsRouter() {
   /** Cheap enough for the overview banner to poll without the rest. */
   router.get('/backups', (req, res) => {
     res.json(backupStatus());
+  });
+
+  /**
+   * Who is connected and what version their screen is holding — item 26.
+   *
+   * Separate from `GET /` because it is polled on a much shorter cycle: during
+   * the rehearsal's "everybody watch your phone" step this is refreshed every
+   * few seconds, and the ops snapshot behind it reads the snapshot directory.
+   *
+   * ⚠️ Admin-only, like everything on this router, and worth saying why: it
+   * names who is in the room and what they are looking at. It carries no access
+   * code, no schedule content and no contact detail — same line the printed
+   * handout pack draws.
+   */
+  router.get('/presence', (req, res) => {
+    res.json(presenceReport());
+  });
+
+  /**
+   * "Can the rehearsal start?" — the same report `npm run rehearsal` prints,
+   * for whoever is holding the panel rather than a terminal. Read-only: it
+   * runs the checks and changes nothing.
+   */
+  router.get('/readiness', (req, res) => {
+    res.json(readinessReport({ baseUrl: publicBaseUrl(req) }));
   });
 
   return router;

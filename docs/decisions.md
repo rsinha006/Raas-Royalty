@@ -1840,3 +1840,44 @@ contract, because "not a git repository" is an ordinary answer there and not
 worth printing above a boot banner. ⚠️ The freeze is cut at 2am the Wednesday
 before, possibly on a laptop that has never run git. A wrong hint costs most
 exactly there, which is the reason this is worth more than a test fix.
+
+---
+
+## Test discovery is a script, because no `node --test` argument spans the matrix
+
+**Decided 2026-08-13** (item 19).
+
+`npm test` is `node scripts/test.js`, which walks `tests/` itself and then hands
+the files to `node --test`. That is more machinery than a glob and it is not a
+preference — measured on 2026-08-13 against a fixture holding one flat and one
+nested test file, with `engines: >=20` and a CI matrix of 20 and 22:
+
+| argument | Node 20 | Node 24 |
+| --- | --- | --- |
+| `tests` | both — it recurses | nothing: resolves `tests` as a *module* |
+| `"tests/**/*.test.js"` | nothing: no glob support before 21 | both — it recurses |
+| `tests/*.test.js` | flat only | flat only |
+
+There is no cell that is recursive and correct on both. Either of the first two
+silently stops testing one leg. The third is what shipped in `ec195cd` and is
+not recursive, so a test file in a subdirectory would never run.
+
+⚠️ **The unquoted `tests/**/*.test.js` is the trap, not the fix.** Bash ships
+with `globstar` off, so `**` degrades to `*` and the pattern expands to
+`tests/*/*.test.js` — which matches nothing at all in a flat `tests/`. It looks
+like the obvious improvement and is strictly the worst option available.
+
+⚠️ **The guard is the point, more than the recursion.** `node --test` with no
+files reports `pass 0, fail 0` and exits 0. That is the entire original failure:
+the Node 20 leg reported green while running zero tests, for as long as it took
+item 20 to grow the suite enough to fail for an unrelated reason. A suite that
+did not run and a suite that passed are the same colour, and every mitigation in
+PLAN.md's risk table is a number of tests — so finding no test files is now an
+explicit exit 1 with the reason printed.
+
+**Rejected: dropping Node 20 and using the quoted glob.** It is the tidiest
+option — production is `node:22` in the Dockerfile, and GitHub already warns
+that Node 20 is deprecated on its runners — but it buys tidiness by narrowing
+what is tested, a week before an event, and the floor in `engines` would then be
+a claim nothing checks. Revisit after the retro, alongside the `px`-to-`rem`
+conversion item 21 deferred.

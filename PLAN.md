@@ -1097,14 +1097,31 @@ the fixtures and CI are what this item added. 335 tests in `tests/`:
   colour on the matrix. If the row count on a leg ever drops rather than the
   colour changing, this is the shape to suspect first.
 
-  ⚠️ **The fix (`ec195cd`) is `node --test tests/*.test.js`, which is expanded
-  by the shell and is one level deep** — where the pattern it replaced was
-  recursive. All 22 test files sit flat in `tests/`, so nothing is skipped
-  today, but that is now a property of the directory layout rather than of the
-  command: **a `tests/sync/foo.test.js` would be silently skipped**, which is
-  the original bug with a smaller blast radius. Add test files flat, or change
-  the script — deliberately not changed before the freeze, since it is the one
-  command every other check is run through.
+  ⚠️ **Made recursive 2026-08-13, and it needed a script rather than a
+  pattern.** `ec195cd`'s `node --test tests/*.test.js` was shell-expanded and
+  one level deep, so a `tests/sync/foo.test.js` would have been skipped in
+  silence — the original bug with a smaller blast radius. The reason it is not
+  simply a better pattern is that **no single `node --test` argument is both
+  recursive and correct across the matrix**, and the two ends fail in opposite
+  directions. Measured against a fixture with one flat and one nested file:
+
+  | argument | Node 20 | Node 24 |
+  | --- | --- | --- |
+  | `tests` | both — it recurses | nothing: resolves `tests` as a *module* |
+  | `"tests/**/*.test.js"` | nothing: no glob support before 21 | both — it recurses |
+  | `tests/*.test.js` | flat only | flat only |
+
+  Either of the first two silently stops testing one leg of a `>=20` matrix.
+  ⚠️ And the tempting unquoted `tests/**/*.test.js` is the worst of all: bash
+  ships with `globstar` **off**, so `**` degrades to `*` and it expands to
+  `tests/*/*.test.js` — which matches *nothing* in a flat `tests/`. Discovery
+  now lives in `scripts/test.js`, which walks the directory itself.
+
+  ⚠️ **The guard in that script matters more than the recursion.** `node --test`
+  with no files reports `pass 0, fail 0` and **exits 0**, which is the whole
+  original failure; finding no test files is now an explicit exit 1. Verified on
+  Node 20 and Node 24: both discover the nested file, and both refuse an empty
+  `tests/`.
 - ✅ The `fixtures/` from item 4 now run through the real pipeline
   (`fixtures.test.js`) — which needed the fixtures repaired first; see below.
 
@@ -1860,7 +1877,7 @@ the 45 live codes.
 | A printed sheet leaks a code | Closed — the handout pack carries no access code at all and a test asserts it; the desk index is the only page that does, and it says on it not to be handed out | 28 |
 | Total app failure during the event | Half closed — verified snapshots every 5 minutes with an off-box copy, a tested restore script, health that fails when phones are not being served, an external dead-man's switch that pages someone, and a printed pack built from the same query the phones run. The restore drill has now been *performed* end to end and timed, and is step 3.5 of the rehearsal script. The targets are unset until the deploy exists, the drill has not been run on a real machine, and nothing has actually been printed because the roster is not real | 23, 26, 28 |
 | The event dates were never checked against today by anything | Closed — `npm run rehearsal` refuses a weekend that has already happened, a date that is not the weekday it claims to be, and a non-contiguous one, measured against the venue's today. Nothing in the app asked this before, which is why the placeholder sat four days in the past unremarked | 9, 24, 26 |
-| A green CI leg that ran no tests | Half closed — this happened: a quoted `tests/**/*.test.js` matched nothing on Node 20, which exited 0 and reported green until item 20 grew the suite enough to turn it red. Fixed in `ec195cd`, and both legs now print the same row count. ⚠️ Every mitigation in this table is a number of tests, so "green" and "ran nothing" being the same colour undermines the column, not one row. The replacement pattern is shell-expanded and one level deep, so a test file added in a subdirectory is still skipped in silence — check the count, not the tick | 19 |
+| A green CI leg that ran no tests | Closed — this happened: a quoted `tests/**/*.test.js` matched nothing on Node 20, which exited 0 and reported green until item 20 grew the suite enough to turn it red. ⚠️ Every mitigation in this table is a number of tests, so "green" and "ran nothing" being the same colour undermined the column, not one row. Discovery now walks `tests/` in `scripts/test.js` — recursive on both ends of the matrix, where no single `node --test` argument is — and **finding no tests is an explicit exit 1** rather than a pass. Still worth reading the count rather than the tick | 19 |
 | Unreadable on a real phone in a dark venue | Half closed — every colour is measured against AA and pinned by tests, and the screen is navigable by heading and by keyboard. The notch, the radio and the battery still need hardware | 21 |
 
 ---

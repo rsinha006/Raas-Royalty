@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Live personalized event schedules for a dance competition",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "dev": "concurrently -n server,client -c cyan,magenta \"npm:dev:server\" \"npm:dev:client\"",
@@ -22,7 +22,7 @@
     "backup": "node scripts/backup.js",
     "restore": "node scripts/restore.js",
     "load-test": "node scripts/load-test.js",
-    "test": "node scripts/test.js",
+    "test": "node --test \"tests/**/*.test.js\"",
     "ci": "npm run build && npm test",
     "postinstall": "npm --prefix client install",
     "rehearsal": "node scripts/rehearsal.js",

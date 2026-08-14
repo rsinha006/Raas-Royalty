@@ -54,15 +54,18 @@ npm run ci      # what CI runs: the client typecheck and build, then the tests
 ```
 
 `.github/workflows/ci.yml` runs the same thing on every push and pull request,
-on Node 20 and 22. Each test file builds its own throwaway database, so they
-never touch `data/`.
+on Node 22 — the version the Dockerfile deploys, and the floor in `engines`.
+Each test file builds its own throwaway database, so they never touch `data/`.
 
-⚠️ The test script's glob is **unquoted on purpose** — `tests/*.test.js`, expanded
-by the shell. Quoting it hands the pattern to `node --test`, which only learned
-to expand globs in Node 21, so a quoted pattern passes on a modern local Node
-and fails on the Node 20 in the matrix with "Could not find". The cost is that
-tests must stay flat in `tests/`; a nested one would be skipped silently rather
-than failing.
+⚠️ The test script's glob is **quoted on purpose** — `"tests/**/*.test.js"`. The
+quotes hand the pattern to `node --test`, which expands it recursively. Unquoted,
+the shell takes it instead, and bash ships with `globstar` off: `**` degrades to
+`*`, the pattern becomes `tests/*/*.test.js`, and it matches **nothing** in a
+flat `tests/`. That form looks like the obvious one and is the worst available.
+
+⚠️ A glob that matches nothing reports `tests 0` and **exits 0** on Node 22+, so
+CI cannot tell "everything passed" from "nothing ran" — which is a failure this
+project has actually shipped, for weeks. Read the test count, not the tick.
 
 ### Load test
 

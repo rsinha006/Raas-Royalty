@@ -12,12 +12,21 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
-      # Not belt and braces. 22 is what actually deploys — the Dockerfile pins
-      # node:22-bookworm-slim — and 20 is the floor in package.json's `engines`,
-      # which the load-test and seed scripts are still run under locally.
+      # One version, and it is the one that deploys: the Dockerfile pins
+      # node:22-bookworm-slim, and `engines` is now `>=22` to match.
+      #
+      # Node 20 was dropped 2026-08-13 along with the test-discovery script it
+      # forced: no single `node --test` argument is recursive on both 20 and
+      # 22+, so supporting the older floor meant either a wrapper or a
+      # non-recursive pattern. See docs/decisions.md.
+      #
+      # ⚠️ The floor in `engines` is only as true as this matrix. If it is
+      # widened again, widen this too — a floor nothing runs is a claim, and
+      # this project has already shipped one: `>=20` held for weeks while the
+      # Node 20 leg was running zero tests.
       fail-fast: false
       matrix:
-        node: ['20', '22']
+        node: ['22']
 
     steps:
       - uses: actions/checkout@v5

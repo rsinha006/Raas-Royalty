@@ -1843,41 +1843,54 @@ exactly there, which is the reason this is worth more than a test fix.
 
 ---
 
-## Test discovery is a script, because no `node --test` argument spans the matrix
+---
 
-**Decided 2026-08-13** (item 19).
+## The Node floor is 22, and test discovery is a plain recursive glob
 
-`npm test` is `node scripts/test.js`, which walks `tests/` itself and then hands
-the files to `node --test`. That is more machinery than a glob and it is not a
-preference — measured on 2026-08-13 against a fixture holding one flat and one
-nested test file, with `engines: >=20` and a CI matrix of 20 and 22:
+**Decided 2026-08-13.** Supersedes the same day's decision to keep Node 20 and
+walk `tests/` from a script — that entry is replaced rather than kept, because
+two live answers to "what does `npm test` run" is the thing this file exists to
+prevent. What follows is what was measured, and then what was chosen.
 
-| argument | Node 20 | Node 24 |
+`npm test` is `node --test "tests/**/*.test.js"`, `engines` is `>=22`, and the
+CI matrix is `['22']` — the version the Dockerfile deploys.
+
+**Why the floor had to move for the glob to work.** No single `node --test`
+argument is both recursive and correct on Node 20 and Node 22+, and the two ends
+fail in opposite directions. Measured on 2026-08-13 against a fixture holding
+one flat and one nested test file:
+
+| argument | Node 20 | Node 22 / 24 |
 | --- | --- | --- |
 | `tests` | both — it recurses | nothing: resolves `tests` as a *module* |
 | `"tests/**/*.test.js"` | nothing: no glob support before 21 | both — it recurses |
 | `tests/*.test.js` | flat only | flat only |
 
-There is no cell that is recursive and correct on both. Either of the first two
-silently stops testing one leg. The third is what shipped in `ec195cd` and is
-not recursive, so a test file in a subdirectory would never run.
+With `>=20` there was no cell that worked, which is why discovery briefly became
+a script. Dropping 20 makes the top-right cell available, and it is the ordinary
+thing every other project does.
 
-⚠️ **The unquoted `tests/**/*.test.js` is the trap, not the fix.** Bash ships
-with `globstar` off, so `**` degrades to `*` and the pattern expands to
-`tests/*/*.test.js` — which matches nothing at all in a flat `tests/`. It looks
-like the obvious improvement and is strictly the worst option available.
+⚠️ **The unquoted `tests/**/*.test.js` remains the trap.** Bash ships with
+`globstar` off, so `**` degrades to `*` and the pattern expands to
+`tests/*/*.test.js` — matching nothing at all in a flat `tests/`. The quotes are
+load-bearing: they are what hands the pattern to Node instead of to the shell.
 
-⚠️ **The guard is the point, more than the recursion.** `node --test` with no
-files reports `pass 0, fail 0` and exits 0. That is the entire original failure:
-the Node 20 leg reported green while running zero tests, for as long as it took
-item 20 to grow the suite enough to fail for an unrelated reason. A suite that
-did not run and a suite that passed are the same colour, and every mitigation in
-PLAN.md's risk table is a number of tests — so finding no test files is now an
-explicit exit 1 with the reason printed.
+⚠️ **Known and accepted: the empty-suite hole is open again, and on 22+ it is
+silent.** `node --test` with a glob that matches nothing reports `tests 0,
+pass 0, fail 0` and **exits 0**. That is the original item 19 bug — the Node 20
+leg reporting green while running zero tests — and the script that replaced the
+glob refused to exit 0 for exactly this reason. Node 20 at least failed loudly
+here (`Could not find …`, exit 1); 22 and 24 do not. What stands in its place is
+weaker and worth naming: the suite is a single flat directory that every commit
+touches, CI prints the count, and PLAN.md says to read the count rather than the
+tick. **If the number ever drops toward zero rather than the colour changing,
+this is the cause.**
 
-**Rejected: dropping Node 20 and using the quoted glob.** It is the tidiest
-option — production is `node:22` in the Dockerfile, and GitHub already warns
-that Node 20 is deprecated on its runners — but it buys tidiness by narrowing
-what is tested, a week before an event, and the floor in `engines` would then be
-a claim nothing checks. Revisit after the retro, alongside the `px`-to-`rem`
-conversion item 21 deferred.
+**Why it was chosen anyway.** The floor was a claim nothing checked — `>=20`
+held for weeks while the Node 20 leg ran no tests at all — and production has
+always been `node:22`. A matrix of one version that actually deploys is more
+honest than two where the older one exists to keep a wrapper alive. GitHub also
+already warns that Node 20 is deprecated on its runners.
+
+⚠️ **The floor is only as true as the matrix.** If `engines` is ever widened
+again, widen `.github/workflows/ci.yml` with it, in the same commit.

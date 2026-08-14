@@ -1805,3 +1805,38 @@ whose every row was refused read as "changes to apply" and those changes were
 the deletion of everybody the file did not name. The gate is now the number of
 rows that resolved to a person, which is item 24's rule again: the test is that
 nothing importable came out, never that some rows failed.
+
+---
+
+## A test that drives git must give its fixture repo an identity, not its own env
+
+**Decided 2026-08-13** (item 27, found by a red CI run on the item 12 push).
+
+`tests/freeze.test.js` builds a real repository in a temp directory and drives it
+through a `run()` helper that injects `GIT_AUTHOR_*` / `GIT_COMMITTER_*` into the
+environment of each `git` call. That covers every command *the test* makes. It
+covers none of the commands *the product* makes: `createFreezeTag` goes through
+`release.js`'s `git()`, which passes no environment of its own.
+
+So tag creation worked for the fixture's own setup and failed for the one call
+under test — but only on a machine where git cannot derive an identity from the
+system. A developer laptop always can. A CI runner may not. The result is a
+suite that is green locally and red on push, which is the worst shape a test can
+have: it spends its credibility at the moment somebody is trying to decide
+whether a failure is real.
+
+**The identity now goes in the fixture repo's own config**, where every caller
+sees it regardless of how it invokes git. Verified by reproducing the runner's
+condition locally with `user.useConfigOnly = true`, which forces git to refuse
+to guess: the suite fails without the fix and passes with it.
+
+**`createFreezeTag` now reports git's stderr rather than guessing at it.** It
+used to answer every failure with `git tag failed — is anything configured to
+sign tags?`, so the red run's evidence pointed at signing config while git had
+actually said `Committer identity unknown`. `git()` gained an opt-in
+`captureError` for this one caller — the only one that asks git to *do*
+something rather than asking it a question; the rest keep the string-or-null
+contract, because "not a git repository" is an ordinary answer there and not
+worth printing above a boot banner. ⚠️ The freeze is cut at 2am the Wednesday
+before, possibly on a laptop that has never run git. A wrong hint costs most
+exactly there, which is the reason this is worth more than a test fix.

@@ -201,6 +201,15 @@ describe('against an actual repository', () => {
   before(() => {
     repo = fs.mkdtempSync(path.join(os.tmpdir(), 'royalty-repo-'));
     run('init', '-b', 'main');
+    // ⚠️ In the repo's own config, not in `run`'s environment. `run` is the
+    // test driving git; `createFreezeTag` is the *product* running git, through
+    // `release.js`'s `git()`, which passes no environment of its own. With the
+    // identity only in `run`'s env, tag creation works for every call the test
+    // makes and fails for the one the product makes — and only on a machine
+    // where git cannot guess an identity, which is a CI runner and not a
+    // laptop. That is exactly how this passed here and went red on push.
+    run('config', 'user.email', 'test@example.com');
+    run('config', 'user.name', 'Royalty Test');
     fs.writeFileSync(path.join(repo, 'a.txt'), 'one\n');
     run('add', '.');
     run('commit', '-m', 'first');
@@ -293,6 +302,26 @@ describe('against an actual repository', () => {
     assert.equal(fresh.ok, true);
     assert.match(run('tag', '--list', 'release-2026-09-11'), /release-2026-09-11/);
     assert.match(run('tag', '-n99', '--list', 'release-2026-09-11'), /a real one/);
+  });
+
+  test('a refused tag carries git’s own words, not a guess at them', () => {
+    // ⚠️ This used to answer every failure with "is anything configured to sign
+    // tags?", which is a diagnosis rather than a report. A red CI run spent its
+    // evidence on signing config while git had actually said "Committer
+    // identity unknown" — and the freeze is cut at 2am on a laptop that may
+    // never have run git, which is exactly when a wrong hint costs the most.
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'royalty-empty-'));
+    try {
+      execFileSync('git', ['init', '-b', 'main'], { cwd: empty, stdio: 'ignore' });
+      // An unborn HEAD: there is no commit to tag, so git refuses and says why.
+      const res = createFreezeTag('release-2026-09-12', 'nothing to tag', { cwd: empty });
+      assert.equal(res.ok, false);
+      assert.match(res.error, /^git tag failed: /);
+      assert.match(res.error, /HEAD/, "git's own reason reaches the caller");
+      assert.doesNotMatch(res.error, /sign/, 'and it is not replaced by a guess');
+    } finally {
+      fs.rmSync(empty, { recursive: true, force: true });
+    }
   });
 
   test('a directory that is not a repository is an ordinary answer, not a crash', () => {

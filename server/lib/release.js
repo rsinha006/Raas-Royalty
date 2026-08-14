@@ -63,18 +63,26 @@ export const FREEZE_TAG_RE = /^release-(\d{4}-\d{2}-\d{2})(?:\.(\d+))?$/;
  * Never throws and never inherits stderr: "not a git repository" is an ordinary
  * answer here (it is what the container says), not a failure worth printing
  * above a boot banner.
+ *
+ * `captureError` is for the one caller that is *asking git to do something*
+ * rather than asking it a question — `createFreezeTag`. A refusal there needs
+ * git's own words: the guessed diagnosis it used to print sent a CI failure
+ * looking at tag signing when the actual message was "Committer identity
+ * unknown". Returns `{ ok, out, error }` instead of a string when set.
  */
-export function git(args, { cwd = APP_ROOT } = {}) {
+export function git(args, { cwd = APP_ROOT, captureError = false } = {}) {
   try {
     const out = execFileSync('git', args, {
       cwd,
       encoding: 'utf8',
       timeout: GIT_TIMEOUT_MS,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    return out.trim();
-  } catch {
-    return null;
+      stdio: ['ignore', 'pipe', captureError ? 'pipe' : 'ignore'],
+    }).trim();
+    return captureError ? { ok: true, out, error: null } : out;
+  } catch (err) {
+    if (!captureError) return null;
+    const stderr = String(err.stderr ?? '').trim();
+    return { ok: false, out: null, error: stderr || err.message || 'git failed' };
   }
 }
 

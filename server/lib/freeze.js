@@ -456,8 +456,13 @@ export function createFreezeTag(tag, message, { cwd } = {}) {
   const opts = cwd ? { cwd } : {};
   const existing = git(['tag', '--list', tag], opts);
   if (existing) return { ok: false, error: `${tag} already exists.` };
-  const result = git(['tag', '-a', tag, '-m', message], opts);
-  if (result === null) return { ok: false, error: 'git tag failed — is anything configured to sign tags?' };
+  // ⚠️ git's own words, not a guess at them. This used to answer every failure
+  // with "is anything configured to sign tags?", which sent a red CI run
+  // looking at signing config when what git actually said was "Committer
+  // identity unknown". The freeze is cut at 2am the Wednesday before, possibly
+  // on a laptop that has never run git — the message has to name the real fix.
+  const result = git(['tag', '-a', tag, '-m', message], { ...opts, captureError: true });
+  if (!result.ok) return { ok: false, error: `git tag failed: ${result.error}` };
   return { ok: true, tag };
 }
 

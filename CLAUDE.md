@@ -21,7 +21,7 @@ otherwise the reasoning is lost between sessions and gets re-litigated.
 npm install && npm run seed && npm run build && npm start   # http://localhost:4000
 npm run dev          # hot reload: client :5173, API :4000
 npm run seed:reset   # rebuild placeholder data from scratch
-npm test             # 618 tests
+npm test             # 619 tests
 npm run ci           # what CI runs: the client typecheck and build, then the tests
 npm run codes -- --list   # every live access code and its subject
 npm run days              # the four event days; --friday YYYY-MM-DD moves them all

@@ -84,7 +84,7 @@ Last updated 2026-08-13.
   own release if the *build* stamped it — there is no repository inside the image
   — so a plain `fly deploy` produces a machine indistinguishable from any other,
   which `preflight` and the Ops panel now say out loud.
-- **618 tests run in CI**, covering authorization negatives, timezone and DST,
+- **619 tests run in CI**, covering authorization negatives, timezone and DST,
   code management, the schema migrations, broadcast scoping, the item 14
   correctness gaps, the bulk shift, the offline shell, preview fidelity,
   everything undo refuses, the announcement target, the measured colour
@@ -686,7 +686,7 @@ stripped.
 
 **Name collisions closed 2026-08-13** — `rosterIdentity()` in
 `server/sync/normalize.js`, an ambiguity refusal in `computeRosterDiff`, and 16
-new tests (`tests/import-pipeline.test.js`, 618 total). Demonstrated through the
+new tests (`tests/import-pipeline.test.js`, 619 total). Demonstrated through the
 real routes on the real dev database, both halves.
 
 ```bash

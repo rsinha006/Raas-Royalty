@@ -1894,3 +1894,54 @@ already warns that Node 20 is deprecated on its runners.
 
 ⚠️ **The floor is only as true as the matrix.** If `engines` is ever widened
 again, widen `.github/workflows/ci.yml` with it, in the same commit.
+
+---
+
+## The bid demo runs on realistic data, and the readiness gate still calls it placeholder
+
+**Decided 2026-09-08**, for the RAS bid interview on the Thursday.
+
+The bid needs a hosted, working app two days from now. It does not need — and
+must not have — the real roster.
+
+**What the demo data is.** `server/demo-seed.js`, run by `npm run seed:demo`.
+The event's *real* shape: last year's eight teams under their own names and in
+their real running order, the exec board by name and committee, and a weekend
+whose times come out of the 2026-27 MASTER workbook — the mixer's setup-to-clear
+sequence, the post-mixer practice run that crosses midnight, the 15-minute tech
+slots with 7-minute transitions, and the show's 12-minute performances with the
+intermission after team four. 281 people, 198 blocks, four days.
+
+**What it is not.** The ~200 dancers and 24 liaisons are invented, and nobody in
+the file has a real phone number or email address — 555 numbers and `.invalid`
+addresses throughout. This is not squeamishness: an access code is a bearer
+token, the demo is on a public hostname, and `samples/` holds ~200 real dancers'
+mobile numbers. Seeding those would publish them. The board appear by name only,
+which is what they agreed to.
+
+⚠️ **The blocks are written with `source = 'seed'`, not a new `'demo'` value,
+and that is the decision worth recording.** `readiness.js` answers "did this
+schedule come from a real import or from placeholder data" by counting
+`source = 'seed'`. A third value would have made `npm run rehearsal` report the
+demo as real event data. That is precisely the failure item 26 exists to
+prevent — a green gate that means nothing — and it would have been *created on
+purpose* here, in the one week where somebody might actually trust the gate.
+The data is realistic; it is not real, and the gate goes on saying so. It does:
+`--check` currently exits 1 with "a rehearsal now would be a rehearsal of the
+placeholder", which is the correct answer.
+
+**The dates are a placeholder and are flagged as one.** 2027-02-11 to 02-14,
+chosen only so the demo is in the future — a schedule whose every block has
+already happened renders entirely greyed out and reads as broken. The real
+weekend is the event director's number and `npm run days -- --friday` moves all
+four days without touching the keys, so this is a one-command change and not a
+reason to edit the seed.
+
+**Deploying is a script rather than a runbook, for this once.**
+`scripts/deploy-demo.sh` is the first-time sequence from `docs/deploy.md` with
+one step the runbook does not have: seeding the volume. A fresh Fly volume is an
+*empty database*, so a deploy that stops at `fly deploy` produces a live
+hostname, a passing `/api/health`, and every access link resolving to nothing.
+The script also refuses to re-seed a volume that already holds a roster, because
+re-seeding rotates every access code that has been handed out.
+

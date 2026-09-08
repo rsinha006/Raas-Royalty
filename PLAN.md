@@ -22,7 +22,13 @@ items 24 and 25 turned out to have real engineering in them, which is done, and
 what remains of both is the roster itself; item 26's tooling and script are
 built and the rehearsal itself needs a room full of people. Item 27's gate, tag
 and drift check are built, and the freeze itself waits on a date and a machine.
-Last updated 2026-08-13.
+
+**Item 29 (the RAS bid demo, 2026-09-10) is now the near deadline**, and it is
+narrower than the event: realistic demo data exists (`npm run seed:demo`) and
+the deploy is scripted (`scripts/deploy-demo.sh`), so what is left is a Fly
+account and a first image build. Neither is a code problem.
+
+Last updated 2026-09-08.
 
 - The viewer is **behind access codes**, enforced server-side, with the roster
   no longer enumerable. Codes are managed and exported from the admin panel.
@@ -1884,6 +1890,53 @@ the 45 live codes.
 
 ---
 
+## Item 29 — `[~]` The RAS bid demo
+
+Not part of the original build order. Added 2026-09-08: the bid interview with
+RAS is on Thursday 2026-09-10, and it needs a hosted, working app to demonstrate
+— which turns "nothing is actually deployed" from a T-2 task into this week's
+only real deadline.
+
+**Done — the data.** `server/demo-seed.js` (`npm run seed:demo`): the event's
+real shape carrying an invented dancer roster. 8 teams under last year's real
+names in their real running order, the exec board by name and committee, 281
+people and 198 blocks across four days, with the weekend's timings taken from
+the 2026-27 MASTER workbook — the mixer, the post-mixer practice run that
+crosses midnight, the 15-minute tech slots, and the show's 12-minute
+performances with the intermission after team four.
+
+⚠️ **No real participant data, deliberately.** Dancers and liaisons are
+invented; nobody in the file has a real phone number or email (555 numbers and
+`.invalid` addresses). An access code is a bearer token and the demo is on a
+public hostname, so seeding `samples/` would publish ~200 real mobile numbers.
+
+⚠️ **The demo blocks are `source = 'seed'`, so `npm run rehearsal` still calls
+this placeholder data — on purpose.** A new `'demo'` provenance value would have
+made the readiness gate report the demo as a real import, which is exactly the
+meaningless green check item 26 exists to prevent. See `docs/decisions.md`.
+
+**Done — the deploy path.** `scripts/deploy-demo.sh` is the first-time sequence
+from `docs/deploy.md` plus the step that runbook is missing: seeding the volume.
+A fresh Fly volume is an *empty database*, so a deploy that stops at
+`fly deploy` gives a live hostname, a passing `/api/health`, and every access
+link resolving to nothing. It refuses to re-seed a volume that already has a
+roster, because that would rotate every code already handed out.
+
+**Still open — and it needs the account holder, not code:**
+
+- **flyctl is not installed and there is no Fly account.** `fly auth login` is a
+  browser flow; nothing here can do it. That is the whole remaining blocker.
+- **The image has never been built.** Docker is not available locally either, so
+  the first `fly deploy` is where a Dockerfile problem would surface. Budget for
+  that being the thing that goes wrong, and do it before Wednesday night.
+- **The dates are a placeholder** — 2027-02-11 to 02-14, chosen only so the demo
+  is in the future. `npm run days -- --friday YYYY-MM-DD` when the real weekend
+  is known.
+- **The board list is last year's.** `BOARD` in `server/demo-seed.js` is the one
+  place to correct it.
+
+---
+
 ## Timeline
 
 Relative, since the event date isn't recorded here yet. Compress from the front
@@ -1900,6 +1953,10 @@ the two that actually catch problems.
 | T-1 | Items 24–26. Items 24 ✅, 25 ✅ and 26 ✅ engineering done early; the roster and the dates are the gate for all three. Dress rehearsal — script and readiness gate ready, needs the room. |
 | Event week | Items 27–28. Both ✅ built early; what is left of 28 is naming the on-call and printing the pack, and of 27 the Wednesday itself — `npm run freeze` refuses today's tree on the dates and the roster, which is the correct answer. |
 | After | Retro. Export the edit log to see what actually changed and how often. |
+
+**Ahead of all of it: the RAS bid interview, Thursday 2026-09-10.** Item 29. It
+does not need real data — it needs the app on a hostname, which is the one thing
+never done.
 
 ---
 

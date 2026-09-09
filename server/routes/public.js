@@ -93,7 +93,25 @@ export function publicRouter({ serveClient = true } = {}) {
     if (req.query.at && !override) {
       return res.status(400).json({ error: 'Expected at=YYYY-MM-DDTHH:MM' });
     }
-    res.json({ ...eventTimeState(), ...(override ? { resolvedAt: override.toISOString() } : {}) });
+    const live = eventTimeState();
+    if (!override) return res.json(live);
+
+    /**
+     * ⚠️ Describe the *rehearsal* instant, not this one. These fields label the
+     * moment being shown, and a rehearsal is routinely months from today — a
+     * February show previewed in September is EST described by an EDT clock,
+     * which puts the wrong zone on screen beside a correct time and reads as
+     * the server having the offset wrong.
+     *
+     * `now` deliberately stays the true instant: it is the drift reference the
+     * client subtracts from its own clock, and a fake one would teach every
+     * phone in a rehearsal that it is months out of step.
+     */
+    res.json({
+      ...eventTimeState(override),
+      now: live.now,
+      resolvedAt: override.toISOString(),
+    });
   });
 
   /* ---------------------------- session ---------------------------- */

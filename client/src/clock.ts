@@ -85,7 +85,15 @@ export function syncClock(
 ): void {
   if (!state) return;
   zone = state.timezone ?? zone;
-  abbreviation = state.abbreviation ?? abbreviation;
+  /**
+   * ⚠️ Not while rehearsing. Every schedule payload carries an `eventTime`
+   * describing *now*, and `/api/schedule` reads no query parameters by design —
+   * so it cannot know about `?now=`. Taking its abbreviation would quietly
+   * overwrite the one `initClock` resolved for the rehearsal instant, and the
+   * banner would settle back to today's zone a moment after it rendered
+   * correctly. A February show previewed in September would read "EDT".
+   */
+  if (overrideAt === null) abbreviation = state.abbreviation ?? abbreviation;
   if (!measureDrift || !state.now) return;
   const serverNow = new Date(state.now).getTime();
   if (Number.isNaN(serverNow)) return;

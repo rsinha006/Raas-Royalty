@@ -290,6 +290,33 @@ describe('what the client is given', () => {
     assert.equal(bad.status, 400);
   });
 
+  /**
+   * The override is routinely months from today, and Indiana observes DST — so
+   * a winter show previewed in the summer is the case that separates
+   * "describes the rehearsal" from "describes right now". It used to put EDT
+   * beside a correct EST time, which reads as the server having the offset
+   * wrong rather than as a label bug.
+   */
+  test('/api/time?at= labels the rehearsal instant, not today', async () => {
+    const winter = await call('GET', '/api/time?at=2027-02-06T17:35');
+    assert.equal(winter.status, 200);
+    assert.equal(winter.body.resolvedAt, '2027-02-06T22:35:00.000Z');
+    assert.equal(winter.body.abbreviation, 'EST');
+    assert.equal(winter.body.utcOffset, '-05:00');
+    assert.equal(winter.body.wallClock, '2027-02-06T17:35');
+
+    const summer = await call('GET', '/api/time?at=2027-07-04T12:00');
+    assert.equal(summer.status, 200);
+    assert.equal(summer.body.abbreviation, 'EDT');
+    assert.equal(summer.body.utcOffset, '-04:00');
+
+    // ⚠️ `now` stays the true instant either way: it is the drift reference the
+    // client subtracts from its own clock, so a faked one would teach every
+    // phone in a rehearsal that it is months out of step.
+    assert.ok(Math.abs(Date.parse(winter.body.now) - Date.now()) < 5000);
+    assert.ok(Math.abs(Date.parse(summer.body.now) - Date.now()) < 5000);
+  });
+
   test('the schedule payload carries instants, not just wall-clock strings', async () => {
     resetRateLimiter();
     const signIn = await fetch(`${base}/api/session`, {

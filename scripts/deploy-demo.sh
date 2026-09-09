@@ -111,9 +111,31 @@ fly deploy -a "$APP" --ha=false \
 # The step the runbook does not have, and the one whose absence looks like a
 # working deploy: a fresh volume holds an empty database, so without this every
 # access link resolves to nothing.
+#
+# ⚠️ Wait for the machine first. `fly deploy` returns once the release is
+# created, which is *before* the machine is accepting SSH — the first run of
+# this script died here on "app has no started VMs", and the failure landed
+# after a successful deploy, so it read as a broken deploy when what was
+# actually broken was an empty database behind a passing health check.
 # ---------------------------------------------------------------------------
-if fly ssh console -a "$APP" -C "node -e \"import('./server/db.js').then(({db})=>process.exit(db.prepare('SELECT COUNT(*) n FROM people').get().n>0?0:1))\"" >/dev/null 2>&1; then
-  say "The volume already holds a roster — NOT re-seeding (that would rotate every access code)"
+say "Waiting for the machine to accept connections"
+READY=""
+for i in $(seq 1 30); do
+  if fly ssh console -a "$APP" -C "true" >/dev/null 2>&1; then READY=1; break; fi
+  printf '.'; sleep 5
+done
+printf '\n'
+[ -n "$READY" ] || die "The machine never came up. Check:  fly status -a $APP  and  fly logs -a $APP"
+
+# Is there already a roster on the volume? Anything but a clean "yes" is treated
+# as "no" and seeded — an empty database is the failure worth fixing twice, and
+# re-seeding a populated one is refused on the next line anyway.
+HAS_ROSTER="$(fly ssh console -a "$APP" -C \
+  "node -e \"import('./server/db.js').then(({db})=>console.log(db.prepare('SELECT COUNT(*) n FROM people').get().n))\"" \
+  2>/dev/null | tr -dc '0-9' || true)"
+
+if [ -n "$HAS_ROSTER" ] && [ "$HAS_ROSTER" -gt 0 ] 2>/dev/null; then
+  say "The volume already holds $HAS_ROSTER people — NOT re-seeding (that would rotate every access code)"
 else
   say "Seeding the demo roster"
   fly ssh console -a "$APP" -C "npm run seed:demo"

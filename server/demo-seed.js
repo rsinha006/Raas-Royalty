@@ -15,10 +15,10 @@
  *
  *   npm run seed:demo         # rebuild the demo database from scratch
  *
- * The dates are the one thing here that is still a placeholder. Change them in
- * one command rather than editing this file:
+ * The dates are real (5-7 February 2027). If they move, use the script rather
+ * than editing this file:
  *
- *   npm run days -- --friday 2027-02-12
+ *   npm run days -- --friday YYYY-MM-DD
  */
 import { db, newId, nowIso, touchRosterVersion, touchScheduleVersion, setMeta } from './db.js';
 import { logEdit } from './lib/mutations.js';
@@ -97,15 +97,25 @@ const demoEmail = (name) =>
 /* ==================== the event ==================== */
 
 /**
- * ⚠️ Placeholder dates. The bid weekend is the event director's number; this is
- * a stand-in chosen only so the demo is in the future. `npm run days --friday`
- * moves all four together and never touches the keys.
+ * The real competition weekend, confirmed 2026-09-08: Friday 5 February to
+ * Sunday 7 February 2027, with Thursday the 4th as the arrival day — teams land
+ * Thursday and fly out Sunday, which is why the event is four days and not
+ * three.
+ *
+ * ⚠️ Verified weekdays, not just typed. 2027-02-04 really is a Thursday and
+ * 2027-02-07 really is a Sunday; a date that is not the weekday it is labelled
+ * with still renders as a perfectly plausible schedule, which is why both
+ * `npm run days` and the weekend migration derive rather than invent. If these
+ * ever move, use the script instead of editing here — it never touches the
+ * keys, and `schedule_blocks.day` is a foreign key onto them.
+ *
+ *   npm run days -- --friday YYYY-MM-DD
  */
 const EVENT_DAYS = [
-  { key: 'Thu', label: 'Thursday', date: '2027-02-11', sort: 1 },
-  { key: 'Fri', label: 'Friday', date: '2027-02-12', sort: 2 },
-  { key: 'Sat', label: 'Saturday', date: '2027-02-13', sort: 3 },
-  { key: 'Sun', label: 'Sunday', date: '2027-02-14', sort: 4 },
+  { key: 'Thu', label: 'Thursday', date: '2027-02-04', sort: 1 },
+  { key: 'Fri', label: 'Friday', date: '2027-02-05', sort: 2 },
+  { key: 'Sat', label: 'Saturday', date: '2027-02-06', sort: 3 },
+  { key: 'Sun', label: 'Sunday', date: '2027-02-07', sort: 4 },
 ];
 
 /**

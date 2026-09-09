@@ -1,5 +1,49 @@
 import type { Contact } from '../types';
 
+/**
+ * The three tap targets, shared by the liaison card and the support contacts
+ * under it — so "Call" says whom in both places, and a contact with no phone
+ * degrades the same way in both.
+ *
+ * Out of context — in a screen reader's list of links, which is how these get
+ * found — "Call" alone does not say whom, and the emoji is read out as
+ * "telephone receiver" ahead of it. The name goes in the accessible name; the
+ * glyph is decoration and says so.
+ */
+export function ContactActions({ contact }: { contact: Contact }) {
+  const telHref = contact.phone ? `tel:${contact.phone.replace(/[^\d+]/g, '')}` : null;
+  const smsHref = contact.phone ? `sms:${contact.phone.replace(/[^\d+]/g, '')}` : null;
+
+  return (
+    <div className="contact-actions">
+      {telHref && (
+        <a className="contact-btn" href={telHref} aria-label={`Call ${contact.name}`}>
+          <span aria-hidden="true">📞</span> Call
+        </a>
+      )}
+      {smsHref && (
+        <a className="contact-btn" href={smsHref} aria-label={`Text ${contact.name}`}>
+          <span aria-hidden="true">💬</span> Text
+        </a>
+      )}
+      {contact.email && (
+        <a
+          className={`contact-btn${telHref ? ' full' : ''}`}
+          href={`mailto:${contact.email}`}
+          aria-label={`Email ${contact.name}`}
+        >
+          <span aria-hidden="true">✉️</span> Email
+        </a>
+      )}
+      {!telHref && !contact.email && (
+        <div className="muted small full" style={{ gridColumn: '1 / -1' }}>
+          No contact method on file.
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Tap-to-call / text / email. Falls back gracefully when a method is missing. */
 export default function ContactCard({ contact }: { contact: Contact | null }) {
   if (!contact) {
@@ -12,9 +56,6 @@ export default function ContactCard({ contact }: { contact: Contact | null }) {
       </div>
     );
   }
-
-  const telHref = contact.phone ? `tel:${contact.phone.replace(/[^\d+]/g, '')}` : null;
-  const smsHref = contact.phone ? `sms:${contact.phone.replace(/[^\d+]/g, '')}` : null;
 
   return (
     <div className="contact">
@@ -32,37 +73,7 @@ export default function ContactCard({ contact }: { contact: Contact | null }) {
         </div>
       )}
 
-      {/* Three links whose visible labels are one word each. Out of context —
-          in a screen reader's list of links, which is how these get found —
-          "Call" alone does not say whom, and the emoji is read out as
-          "telephone receiver" ahead of it. The name goes in the accessible
-          name; the glyph is decoration and says so. */}
-      <div className="contact-actions">
-        {telHref && (
-          <a className="contact-btn" href={telHref} aria-label={`Call ${contact.name}`}>
-            <span aria-hidden="true">📞</span> Call
-          </a>
-        )}
-        {smsHref && (
-          <a className="contact-btn" href={smsHref} aria-label={`Text ${contact.name}`}>
-            <span aria-hidden="true">💬</span> Text
-          </a>
-        )}
-        {contact.email && (
-          <a
-            className={`contact-btn${telHref ? ' full' : ''}`}
-            href={`mailto:${contact.email}`}
-            aria-label={`Email ${contact.name}`}
-          >
-            <span aria-hidden="true">✉️</span> Email
-          </a>
-        )}
-        {!telHref && !contact.email && (
-          <div className="muted small full" style={{ gridColumn: '1 / -1' }}>
-            No contact method on file.
-          </div>
-        )}
-      </div>
+      <ContactActions contact={contact} />
     </div>
   );
 }

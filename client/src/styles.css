@@ -586,6 +586,34 @@ a {
   grid-column: 1 / -1;
 }
 
+/* --------------------------- support contacts --------------------------- */
+
+/* Sits under the liaison card as a second card of the same weight. Not tinted
+   red or badged as an emergency: this is a person somebody may want to text on
+   the Sunday, and a card that shouts is a card people avoid opening in front of
+   their team. */
+.contact.support {
+  margin-top: 14px;
+}
+
+.support-list {
+  margin-top: 14px;
+}
+
+.support-person {
+  border-top: 1px solid var(--line-soft);
+  padding-top: 14px;
+}
+.support-person:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.support-name {
+  font-size: 17px;
+  font-weight: 700;
+}
+
 /* ------------------------------ landing ------------------------------ */
 
 .landing {

@@ -181,6 +181,33 @@ export function listContacts() {
   return db.prepare('SELECT * FROM contact_cards ORDER BY name').all().map(shapeContact);
 }
 
+/**
+ * The support contacts, in the order they are shown.
+ *
+ * ⚠️ On the `/api/schedule` path, which is the fan-out ceiling — so the SQL is
+ * a constant and goes through `prepareCached` rather than being assembled per
+ * request. It is two rows off a two-column table; the cost that matters here is
+ * compiling the statement 600 times, not running it.
+ */
+const SUPPORT_CONTACT_SELECT = `
+  SELECT c.*
+    FROM support_contacts s
+    JOIN contact_cards c ON c.id = s.contact_id
+   ORDER BY s.sort_order, c.name
+`;
+
+export function listSupportContacts() {
+  return prepareCached(SUPPORT_CONTACT_SELECT).all().map(shapeContact);
+}
+
+/** The contact ids currently designated, for the admin panel's checkboxes. */
+export function listSupportContactIds() {
+  return db
+    .prepare('SELECT contact_id FROM support_contacts ORDER BY sort_order')
+    .all()
+    .map((r) => r.contact_id);
+}
+
 export function listLocations() {
   return db
     .prepare('SELECT * FROM locations ORDER BY venue_name, sub_location')
@@ -386,6 +413,13 @@ export function getPersonalizedSchedule(session) {
     session: { type: session.type, id: session.id },
     subject: resolved.subject,
     contact: resolved.contact,
+    /**
+     * The same list for every session — a team code, a person, a role code.
+     * Deliberately not personalized: "who can I talk to about this" must not
+     * depend on which door somebody came in through, and a session that
+     * resolves to no liaison at all still gets these.
+     */
+    supportContacts: listSupportContacts(),
     days: listDays(),
     blocks: blocksForTargets(resolved.targets),
     // This session's own targets, not the event's. A global timestamp meant a

@@ -23,12 +23,15 @@ what remains of both is the roster itself; item 26's tooling and script are
 built and the rehearsal itself needs a room full of people. Item 27's gate, tag
 and drift check are built, and the freeze itself waits on a date and a machine.
 
+Item 30 (a sexual assault support contact in the viewer) landed 2026-09-09;
+the engineering is done and the assignment is a board decision.
+
 **Item 29 (the RAS bid demo, 2026-09-10) is now the near deadline**, and it is
 narrower than the event: realistic demo data exists (`npm run seed:demo`) and
 the deploy is scripted (`scripts/deploy-demo.sh`), so what is left is a Fly
 account and a first image build. Neither is a code problem.
 
-Last updated 2026-09-08.
+Last updated 2026-09-09.
 
 - The viewer is **behind access codes**, enforced server-side, with the roster
   no longer enumerable. Codes are managed and exported from the admin panel.
@@ -90,7 +93,7 @@ Last updated 2026-09-08.
   own release if the *build* stamped it — there is no repository inside the image
   — so a plain `fly deploy` produces a machine indistinguishable from any other,
   which `preflight` and the Ops panel now say out loud.
-- **619 tests run in CI**, covering authorization negatives, timezone and DST,
+- **635 tests run in CI**, covering authorization negatives, timezone and DST,
   code management, the schema migrations, broadcast scoping, the item 14
   correctness gaps, the bulk shift, the offline shell, preview fidelity,
   everything undo refuses, the announcement target, the measured colour
@@ -105,6 +108,11 @@ Last updated 2026-09-08.
   never fall back to a version string that has never changed, and — new — every
   way the roster importer refuses two rows it cannot tell apart, including the
   re-sync that silently froze one of two people sharing a name.
+- **Every participant can reach a sexual assault support contact from their own
+  schedule.** Two board members named under the liaison card, same tap-to-call
+  and tap-to-text, on every session's payload rather than on dancers' alone —
+  and on the printed pack, so the answer survives the app being down. Who holds
+  it is set in the panel; the seeds only carry placeholders. Item 30.
 - **The app is usable by someone who cannot see it.** Headings, landmarks and a
   real list where there were only `div`s; every colour measured against AA
   rather than eyeballed; one keyboard tab pattern instead of four broken ones;
@@ -1934,6 +1942,47 @@ roster, because that would rotate every code already handed out.
   is known.
 - **The board list is last year's.** `BOARD` in `server/demo-seed.js` is the one
   place to correct it.
+
+---
+
+## Item 30 — `[x]` A sexual assault support contact in the viewer
+
+Not part of the original build order. Added 2026-09-09, from the board: under
+the liaison card every participant already has, a second card naming the board
+members they can reach about sexual assault or harassment, with the same
+tap-to-call and tap-to-text.
+
+**The shape.** `support_contacts` is a *designation over `contact_cards`*, not a
+new kind of person and not a column on the card: whoever holds it is usually
+already on a card for some other reason, and a second place to type a phone
+number is a second place for it to be wrong. Ordered, because the list is read
+top to bottom on a phone. `ON DELETE CASCADE`, because a designation pointing at
+a deleted card renders as a blank name with no number under it — an answer that
+looks like an answer.
+
+**Not personalized, deliberately.** The same list rides on every payload —
+a team code before the identity step, a dancer who has picked her name, a judge
+with no liaison at all. "Who can I talk to about this" must not depend on which
+door somebody came in through, and the person furthest from anyone they know is
+exactly the one whose session resolves to no contact card.
+
+**Two, not one** — one name is one person who might be the person somebody needs
+to talk about. It is also why the panel edits the list rather than a single
+slot.
+
+**On paper too.** `call-sheets.js` prints them on every handout sheet from the
+same `listSupportContacts()` the viewer payload uses, so paper cannot disagree
+with the phones — and on the handout half rather than the desk index, because
+the desk is exactly where somebody may not want to ask.
+
+**Who holds it is data, and is not decided here.** The seeds designate two
+placeholder Social Chairs so the path is exercised; the real assignment is made
+in **Roster → Contacts → Sexual assault support contacts** and is a board
+decision, including that the two people have agreed to it. ⚠️ Nothing in the app
+claims the conversation is confidential — if that promise is going to be made,
+it is the board's to word, and the card's note field is where it goes.
+
+15 tests in `tests/support-contacts.test.js`; 635 in CI.
 
 ---
 

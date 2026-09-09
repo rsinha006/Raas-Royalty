@@ -24,6 +24,21 @@ CREATE TABLE IF NOT EXISTS contact_cards (
   note   TEXT
 );
 
+-- Support contacts — the board members a participant can reach about sexual
+-- assault or harassment. This is a *designation*, not another column on the
+-- card: the people who hold it are usually already on a card for some other
+-- reason (a liaison, a chair), and one list read in one place is what stops
+-- "who is the support contact" having two answers.
+--
+-- Ordered, because the viewer prints the names in a fixed order rather than
+-- whichever the query happened to return first, and ON DELETE CASCADE because
+-- a deleted card must not leave a name-less row that renders as a blank
+-- support contact — the one failure mode here that is worse than none.
+CREATE TABLE IF NOT EXISTS support_contacts (
+  contact_id TEXT PRIMARY KEY REFERENCES contact_cards(id) ON DELETE CASCADE,
+  sort_order INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS teams (
   id                 TEXT PRIMARY KEY,
   name               TEXT NOT NULL UNIQUE,

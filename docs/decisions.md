@@ -1945,3 +1945,50 @@ hostname, a passing `/api/health`, and every access link resolving to nothing.
 The script also refuses to re-seed a volume that already holds a roster, because
 re-seeding rotates every access code that has been handed out.
 
+
+## The support contact is a designation over the contact cards, and it is not personalized
+
+**Decided 2026-09-09 (item 30).** Every participant's schedule ends with the
+liaison they can call. Under it now sits a second card naming the board members
+they can reach about sexual assault or harassment, with the same tap-to-call and
+tap-to-text.
+
+**A designation, not a new kind of person and not a column on the card.**
+`support_contacts` holds contact card ids and an order, nothing else. The people
+who hold this are usually already on a card for some other reason — a chair, a
+head liaison — and a second place to type their phone number is a second place
+for it to be wrong and a second answer to "what is her number". The order is
+stored because the list is read top to bottom on a phone, and "who to reach
+first" is a thing the board should be able to express.
+
+⚠️ **`ON DELETE CASCADE`, because the alternative renders.** A designation
+pointing at a deleted card is a support contact with no name and no number under
+it — an answer that looks like an answer, on the one card where being wrong is
+worst. The cascade is asserted by a test rather than assumed from the pragma.
+
+⚠️ **Not personalized, and this is the load-bearing part.** The same list rides
+on every payload: a team code before the identity step, a dancer who has picked
+her name, a staff member with their own code, a role code. It would have been
+natural to hang this off the liaison the viewer already resolves — and the
+session that would then show *nothing* is the one belonging to someone with no
+team and no liaison, which is the person furthest from anybody they know. "Who
+can I talk to about this" must not depend on which door somebody came in
+through.
+
+**Two people, not one.** One name is one person who might be the person somebody
+needs to talk about. That is also why the panel edits a list rather than filling
+a single slot, and why the whole list is replaced in one write — the order of
+the boxes is the order it is read in.
+
+**On paper, on the handout half.** `call-sheets.js` prints them from the same
+`listSupportContacts()` the viewer payload uses, so paper and phones cannot
+disagree. Not on the desk index alone: the desk is exactly where somebody may
+not want to ask.
+
+**Who holds it is a board decision, and the app does not make it.** The seeds
+designate two placeholder Social Chairs so the path is exercised and the demo
+shows something; the real assignment happens in Roster → Contacts. ⚠️ Nothing in
+the app claims the conversation is confidential or that the person is trained.
+If those promises are going to be made they are the board's to word — the card's
+note field is where they go — and an app that invents them on the board's behalf
+is making a promise nobody agreed to.

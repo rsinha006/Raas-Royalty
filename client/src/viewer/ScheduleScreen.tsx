@@ -13,6 +13,7 @@ import { eventNow, eventZoneAbbreviation, isRehearsing, syncClock } from '../clo
 import { useTabStrip } from '../tabstrip';
 import BlockCard from './BlockCard';
 import ContactCard from './ContactCard';
+import SupportContacts from './SupportContacts';
 import NowNext from './NowNext';
 import Loading from '../Loading';
 
@@ -315,6 +316,10 @@ export default function ScheduleScreen({
         </div>
 
         <ContactCard contact={payload.contact} />
+        {/* `?? []` rather than a cache-version bump: the field is additive, and
+            discarding every phone's offline schedule to add it would cost more
+            than the one refresh it takes to arrive. */}
+        <SupportContacts contacts={payload.supportContacts ?? []} />
 
         <p className="tiny faint center" style={{ marginTop: 24 }}>
           Last updated {formatTimestamp(payload.updatedAt)} ·{' '}

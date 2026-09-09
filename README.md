@@ -221,6 +221,7 @@ so a drift check reading it would report a match forever.
 | `people` | `team_id` nullable (dancers only), `contact_id` optional. Roles live in `person_roles`, not here. |
 | `person_roles` | Many-to-many. Almost everyone holds one role; captains hold `Dancer` + `Captain` so three captain-only blocks can be role-targeted. Display role = lowest `sort_order`. |
 | `contact_cards` | Name, title, phone, email, note. |
+| `support_contacts` | Which contact cards are shown to every participant as sexual assault support contacts, and in what order. A designation over `contact_cards`, never a second copy of a number; cascades when the card is deleted. Set in **Roster → Contacts**. |
 | `locations` | `venue_name` + `sub_location` ("Main Venue → Green Room B"). |
 | `event_days` | Fri/Sat as rows with real dates, so "now / next" knows what's past. |
 | `schedule_blocks` | `applies_to_type` is `team`, `person`, `role`, or `everyone`. |

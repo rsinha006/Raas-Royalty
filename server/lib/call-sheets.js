@@ -42,6 +42,7 @@ import {
   listDays,
   listPeople,
   listRoles,
+  listSupportContacts,
   listTeams,
 } from './queries.js';
 import { accessFor, ROUTES } from './view-as.js';
@@ -272,6 +273,13 @@ export function buildCallSheets({ at = new Date(), baseUrl = '', env = process.e
     time,
     days,
     onCall: onCall(env),
+    /**
+     * The same names the phones show, on every sheet. Paper is what is left
+     * when the app is down, and "who can I talk to about this" is the last
+     * thing that should only exist on a screen. Read from the same function
+     * the viewer payload uses, so the two cannot drift.
+     */
+    supportContacts: listSupportContacts(),
     sheets,
     desk,
     coverage: {
@@ -377,6 +385,18 @@ function contactHtml(contact) {
   }</div>`;
 }
 
+/**
+ * Printed under "Who to call" on every handout sheet — not on the desk index
+ * alone, because the desk is exactly where somebody may not want to ask.
+ */
+function supportHtml(doc) {
+  if (!doc.supportContacts?.length) return '';
+  const people = doc.supportContacts
+    .map((c) => `${esc(c.name)}${c.phone ? ` — ${esc(c.phone)}` : ''}`)
+    .join(' · ');
+  return `<div class="contact"><strong>Sexual assault support:</strong> ${people}</div>`;
+}
+
 function sheetHtml(doc, sheet) {
   /**
    * Only the people who have something of their own get a table. On a 25-dancer
@@ -416,6 +436,7 @@ function sheetHtml(doc, sheet) {
     ${sections || '<p class="empty muted">Nobody here has a block of their own.</p>'}
     ${restHtml}
     ${contactHtml(sheet.contact)}
+    ${supportHtml(doc)}
   </section>`;
 }
 

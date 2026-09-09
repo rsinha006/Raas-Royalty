@@ -9,6 +9,8 @@ interface RosterData {
   teams: Team[];
   people: Person[];
   contacts: Contact[];
+  /** Which cards the viewer shows as support contacts, in the order shown. */
+  supportContactIds: string[];
 }
 
 type Section = 'people' | 'teams' | 'contacts' | 'roles';
@@ -456,6 +458,7 @@ function Teams({ data, mutate, remove }: { data: RosterData; mutate: Mutate; rem
 
 function Contacts({ data, mutate }: { data: RosterData; mutate: Mutate }) {
   const [form, setForm] = useState({ name: '', title: '', phone: '', email: '', note: '' });
+  const support = data.supportContactIds ?? [];
 
   return (
     <>
@@ -508,11 +511,16 @@ function Contacts({ data, mutate }: { data: RosterData; mutate: Mutate }) {
         </div>
       </div>
 
+      <SupportContacts data={data} mutate={mutate} />
+
       <div className="card">
         {data.contacts.map((c) => (
           <div className="list-row" key={c.id}>
             <div style={{ minWidth: 0 }}>
-              <div className="label">{c.name}</div>
+              <div className="label">
+                {c.name}
+                {support.includes(c.id) && <span className="badge soft"> Support contact</span>}
+              </div>
               <div className="sub">{[c.title, c.phone, c.email].filter(Boolean).join(' · ')}</div>
             </div>
             <button
@@ -528,6 +536,64 @@ function Contacts({ data, mutate }: { data: RosterData; mutate: Mutate }) {
         ))}
       </div>
     </>
+  );
+}
+
+/**
+ * Who the viewer shows under everyone's liaison as a sexual assault support
+ * contact.
+ *
+ * Checkboxes over an existing card rather than a form of its own: the people
+ * who hold this are already on the roster, and a second place to type a phone
+ * number is a second place for it to be wrong. Saved as the whole list — the
+ * order of the boxes is the order they are read on the phone.
+ */
+function SupportContacts({ data, mutate }: { data: RosterData; mutate: Mutate }) {
+  /**
+   * Held locally between reloads, not read straight off `data` on every click.
+   * Each toggle sends the whole list, so a second click made before the first
+   * one's reload lands would otherwise build its list from the stale prop and
+   * silently drop the person just added — the write looks like it worked and
+   * one name is gone.
+   */
+  const [selected, setSelected] = useState<string[]>(data.supportContactIds ?? []);
+  useEffect(() => setSelected(data.supportContactIds ?? []), [data.supportContactIds]);
+
+  const toggle = (id: string) => {
+    const next = selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id];
+    setSelected(next);
+    mutate(() => api.put('/api/admin/support-contacts', { contactIds: next }));
+  };
+
+  return (
+    <div className="card">
+      <h3>Sexual assault support contacts</h3>
+      <p className="sub" style={{ marginTop: 6 }}>
+        Shown to every participant under their own liaison, with the card's name, title and
+        number. Everyone sees the same list, so pick people who have agreed to hold it.
+      </p>
+      <div className="stack" style={{ marginTop: 10 }}>
+        {data.contacts.map((c) => (
+          <label className="small row" key={c.id} style={{ gap: 8, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={selected.includes(c.id)}
+              onChange={() => toggle(c.id)}
+            />
+            <span>
+              {c.name}
+              {c.title ? ` — ${c.title}` : ''}
+              {c.phone ? '' : ' (no phone on this card)'}
+            </span>
+          </label>
+        ))}
+      </div>
+      {!selected.length && (
+        <p className="sub" style={{ marginTop: 10 }}>
+          Nobody is assigned — the section does not appear on anyone's phone.
+        </p>
+      )}
+    </div>
   );
 }
 

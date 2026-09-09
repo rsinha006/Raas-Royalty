@@ -23,6 +23,7 @@ import {
   listLocations,
   listPeople,
   listRoles,
+  listSupportContactIds,
   listTeams,
 } from '../lib/queries.js';
 import {
@@ -206,6 +207,7 @@ export function adminRouter({ broadcast }) {
       teams: listTeams(),
       people: listPeople(),
       contacts: listContacts(),
+      supportContactIds: listSupportContactIds(),
       days: listDays(),
       locations: listLocations(),
     });
@@ -480,6 +482,47 @@ export function adminRouter({ broadcast }) {
     );
     rosterChanged(req, `Updated contact card for ${req.body.name ?? prev.name}`);
     res.json({ ok: true });
+  });
+
+  /**
+   * Who the viewer shows as a sexual assault support contact — the whole list,
+   * replaced in one write rather than a toggle per card.
+   *
+   * One write because the order is the list: sending the ids in the order they
+   * should be read makes "who is first" a thing the panel can express, and a
+   * per-card toggle would have to invent a position for each new one. Unknown
+   * ids are refused rather than skipped — a designation that silently did not
+   * take is a support contact nobody can reach.
+   */
+  router.put('/support-contacts', (req, res) => {
+    const ids = Array.isArray(req.body?.contactIds) ? req.body.contactIds.map(String) : null;
+    if (!ids) return res.status(400).json({ error: 'contactIds must be an array' });
+    if (new Set(ids).size !== ids.length) {
+      return res.status(400).json({ error: 'contactIds contains the same card twice' });
+    }
+    const known = new Set(db.prepare('SELECT id FROM contact_cards').all().map((c) => c.id));
+    const missing = ids.filter((id) => !known.has(id));
+    if (missing.length) {
+      return res.status(400).json({ error: `No contact card: ${missing.join(', ')}` });
+    }
+    const insert = db.prepare(
+      'INSERT INTO support_contacts (contact_id, sort_order) VALUES (?, ?)'
+    );
+    db.transaction(() => {
+      db.prepare('DELETE FROM support_contacts').run();
+      ids.forEach((id, i) => insert.run(id, i));
+    })();
+    const names = db
+      .prepare('SELECT id, name FROM contact_cards')
+      .all()
+      .reduce((m, c) => m.set(c.id, c.name), new Map());
+    rosterChanged(
+      req,
+      ids.length
+        ? `Set the support contacts to ${ids.map((id) => names.get(id)).join(', ')}`
+        : 'Removed every support contact'
+    );
+    res.json({ ok: true, contactIds: ids });
   });
 
   router.delete('/contacts/:id', (req, res) => {

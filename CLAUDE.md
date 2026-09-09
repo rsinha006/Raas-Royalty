@@ -21,7 +21,7 @@ otherwise the reasoning is lost between sessions and gets re-litigated.
 npm install && npm run seed && npm run build && npm start   # http://localhost:4000
 npm run dev          # hot reload: client :5173, API :4000
 npm run seed:reset   # rebuild placeholder data from scratch
-npm test             # 620 tests
+npm test             # 635 tests
 npm run ci           # what CI runs: the client typecheck and build, then the tests
 npm run codes -- --list   # every live access code and its subject
 npm run days              # the four event days; --friday YYYY-MM-DD moves them all
@@ -75,7 +75,7 @@ React/Vite bundle from `client/dist`. No external services.
 - `client/src/viewer/` — the participant app
 - `client/src/admin/` — the logistics panel
 
-Seventeen things worth knowing before changing anything:
+Eighteen things worth knowing before changing anything:
 
 **Block targets are four-way, and the fourth is not like the others.** A block
 targets a team, a person, a role, or `everyone` — the announcement audience,
@@ -269,6 +269,21 @@ live credential; there is a test that no code reaches the handout pack. Coverage
 because both are silent everywhere else. Guide:
 [docs/admin-guide.md](docs/admin-guide.md).
 
+**The support contact list is a designation, and it is the same for everyone.**
+`support_contacts` holds contact card ids and an order — never a second copy of
+somebody's phone number, which is why it points at `contact_cards` rather than
+adding a column to it, and why it cascades on delete: a designation pointing at
+a deleted card renders as a blank name with no number, an answer that looks like
+an answer. ⚠️ **It rides on every payload unchanged, not personalized** — a team
+code before the identity step, a dancer, a judge with no liaison at all. Hanging
+it off the liaison the viewer already resolves would blank it for exactly the
+person with no team and nobody they know. `call-sheets.js` prints it from the
+same function on the *handout* half, because paper must not disagree with the
+phones and the desk is where somebody may not want to ask. ⚠️ Who holds it is a
+board decision made in Roster → Contacts; the seeds carry placeholders, and
+nothing in the app claims the conversation is confidential — that promise is the
+board's to word, in the card's note.
+
 **A green rehearsal against the placeholder is indistinguishable from a real
 one.** Dates that have already happened, six example roster rows and two
 entirely empty days all render as a perfectly ordinary schedule, and every test
@@ -348,8 +363,9 @@ guess when it does not, the weekend prints onto paper that cannot disagree with
 the phones, "did every phone get that?" is a number on the panel rather than
 fifteen people being asked, a rehearsal against placeholder data is refused by
 name rather than passing quietly, the release that goes to the venue is tagged
-behind a gate and the machine can be asked whether it is holding it, and 602
-tests run in CI.
+behind a gate and the machine can be asked whether it is holding it, every participant can reach a
+named sexual assault support contact from their own schedule and off the printed
+pack, and 635 tests run in CI.
 
 Still not true: **nothing is actually deployed** — item 22 built the config, the
 guardrails and the runbook, but `fly deploy` needs an account and has not been

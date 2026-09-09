@@ -61,6 +61,7 @@ if (RESET) {
     DELETE FROM schedule_blocks;
     DELETE FROM people;
     DELETE FROM teams;
+    DELETE FROM support_contacts;
     DELETE FROM contact_cards;
     DELETE FROM locations;
     DELETE FROM event_days;
@@ -178,6 +179,25 @@ const seed = db.transaction(() => {
   const mediaLead = makeContact('Rowan Vance', 'Media Lead');
   const sponsorLead = makeContact('Camila Duarte', 'Sponsorship Lead');
   setMeta('default_contact_id', logisticsLead);
+
+  /* -------------------- support contacts -------------------- */
+  /**
+   * The two board members a participant can reach about sexual assault or
+   * harassment, shown to every viewer under their own liaison.
+   *
+   * Placeholder names like everything else in this file — who actually holds
+   * this is a board decision, made in the panel's Contacts section rather than
+   * here. Two rather than one on purpose: one name is one person who might be
+   * the person somebody needs to talk about.
+   */
+  const insSupport = db.prepare(
+    'INSERT INTO support_contacts (contact_id, sort_order) VALUES (?, ?)'
+  );
+  const supportNote = 'Reach out any time during the weekend — call or text.';
+  [
+    makeContact('Ishani Rao', 'Social Chair', supportNote),
+    makeContact('Devan Mistry', 'Social Chair', supportNote),
+  ].forEach((id, i) => insSupport.run(id, i));
 
   /* -------------------- teams + liaisons -------------------- */
   const teamNames = [

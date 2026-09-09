@@ -154,6 +154,8 @@ export interface SchedulePayload {
   session: { type: Selector; id: string };
   subject: Subject;
   contact: Contact | null;
+  /** Shown under the liaison; the same list for everyone. Empty if unassigned. */
+  supportContacts: Contact[];
   days: EventDay[];
   blocks: Block[];
   updatedAt: string;

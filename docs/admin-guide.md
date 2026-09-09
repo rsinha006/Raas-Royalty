@@ -108,6 +108,36 @@ everywhere else in the app.
 
 ---
 
+## The sexual assault support contacts
+
+Every participant's schedule ends with their liaison, and under it a card naming
+the board members they can reach about sexual assault or harassment — same
+call and text buttons. Everyone sees the same names: a judge with no liaison and
+a dancer who hasn't tapped her name yet both get them.
+
+Set them in **Roster → Contacts → Sexual assault support contacts**. The
+checkboxes list the contact cards you already have; tick the people who hold it,
+in the order they should be read. Add a card first if they don't have one — the
+card's name, title and phone are exactly what the phone shows.
+
+**Before the doors open:**
+
+- **The people on it have agreed to be on it.** The app will show their mobile
+  number to ~280 people.
+- **Two of them, not one.** One name is one person who might be the person
+  somebody needs to talk about.
+- **The card's note is where any promise goes.** The app says nothing about
+  confidentiality or training on its own — if that is being offered, word it
+  there, in the board's words.
+- They print on every handout call sheet too, so paper carries the same answer
+  when the app is down. Reprint after you change them.
+
+If nobody is assigned, the section simply does not appear on anyone's phone —
+there is no placeholder and no error, so check it in **View as** after setting
+it.
+
+---
+
 ## Who is on call
 
 The app pages one named person. Set before the deploy, and it prints on the desk

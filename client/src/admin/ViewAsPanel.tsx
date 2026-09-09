@@ -7,6 +7,7 @@ import type { SchedulePayload, TargetType, TeamMember } from '../types';
 import BlockCard from '../viewer/BlockCard';
 import ContactCard from '../viewer/ContactCard';
 import NowNext from '../viewer/NowNext';
+import SupportContacts from '../viewer/SupportContacts';
 import Loading from '../Loading';
 
 /**
@@ -259,6 +260,9 @@ export default function ViewAsPanel() {
             )}
 
             <ContactCard contact={schedule.contact} />
+            {/* Same components as the phone, from the same payload — the whole
+                point of item 16 is that this cannot disagree with it. */}
+            <SupportContacts contacts={schedule.supportContacts ?? []} />
           </div>
         </>
       )}

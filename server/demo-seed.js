@@ -171,6 +171,7 @@ db.exec(`
   DELETE FROM person_roles;
   DELETE FROM people;
   DELETE FROM teams;
+  DELETE FROM support_contacts;
   DELETE FROM contact_cards;
   DELETE FROM locations;
   DELETE FROM event_days;
@@ -257,6 +258,25 @@ const build = db.transaction(() => {
   const creativeCard = makeContact('Sarayu Kalwa', 'Creative Chair', 'Media and stage design');
   const externalCard = makeContact('Ronin Shah', 'External Chair', 'Sponsors and RAS');
   setMeta('default_contact_id', logisticsCard);
+
+  /**
+   * The support contacts — the board members a participant can reach about
+   * sexual assault or harassment, shown to every viewer under their liaison.
+   *
+   * ⚠️ Two things to confirm before this is shown to anyone outside a demo:
+   * *who* holds it (these two are placeholders, picked because the board has no
+   * Social committee row in this file), and that they have agreed to. The
+   * phone numbers here are invented like every other number in this file. The
+   * assignment is changed in the panel's Contacts section, not by editing this.
+   */
+  const insSupport = db.prepare(
+    'INSERT INTO support_contacts (contact_id, sort_order) VALUES (?, ?)'
+  );
+  const supportNote = 'Reach out any time during the weekend — call or text.';
+  [
+    makeContact('Shreya Wunnava', 'Social Chair', supportNote),
+    makeContact('Ria Challa', 'Social Chair', supportNote),
+  ].forEach((id, i) => insSupport.run(id, i));
 
   /* -------------------- teams -------------------- */
   const insTeam = db.prepare(

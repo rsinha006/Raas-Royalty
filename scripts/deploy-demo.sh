@@ -139,3 +139,29 @@ else
   printf '\n  ADMIN_PASSWORD was already set. If you do not have it:\n'
   printf '    fly secrets set -a %s ADMIN_PASSWORD="$(openssl rand -base64 18)"\n\n' "$APP"
 fi
+
+# ⚠️ This machine does not stop on its own — see the note at the end of this file.
+printf '  This runs until you stop it. When the interview is over:\n'
+printf '    fly apps destroy %s          # everything, including the data\n' "$APP"
+printf '    fly scale count 0 -a %s      # or just stop the compute, keep the volume\n\n' "$APP"
+
+# ---------------------------------------------------------------------------
+# What this costs, and how to stop it costing that
+#
+# Billing is per-second: a shared-cpu-1x/1GB machine is about $5.92 for a full
+# month, and the volume is under the 10GB that costs nothing. A demo that is up
+# for a few days is cents, and a new account's $5 trial credit generally covers
+# it outright.
+#
+# ⚠️ It does NOT stop on its own. `auto_stop_machines = false` and
+# `min_machines_running = 1` in fly.toml are deliberate — during the real event
+# an idle machine is a cold start in front of 280 phones — but for a demo they
+# mean the meter runs until you say otherwise. When the interview is over:
+#
+#   fly apps destroy royalty-schedule       # machine, volume and all
+#
+# Or keep the app and just stop paying for compute:
+#
+#   fly scale count 0 -a royalty-schedule   # volume and data stay, machine stops
+#   fly scale count 1 -a royalty-schedule --ha=false   # bring it back
+# ---------------------------------------------------------------------------

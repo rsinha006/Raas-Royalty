@@ -339,7 +339,7 @@ links to people is [docs/distributing-links.md](docs/distributing-links.md).
 ## Current state
 
 Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13, 14, 19,
-20, 22, 23, 27 and 28 are done. Item 21's accessibility half is done and its hardware
+20, 22, 23, 27, 28 and 30 are done. Item 21's accessibility half is done and its hardware
 half is a checklist in [docs/device-matrix.md](docs/device-matrix.md); items 24
 and 25 have their engineering done and their content half is a gap list in
 [docs/loading-data.md](docs/loading-data.md); item 26's tooling and script are
@@ -367,21 +367,32 @@ behind a gate and the machine can be asked whether it is holding it, every parti
 named sexual assault support contact from their own schedule and off the printed
 pack, and 635 tests run in CI.
 
-Still not true: **nothing is actually deployed** — item 22 built the config, the
-guardrails and the runbook, but `fly deploy` needs an account and has not been
-run, and the image has never been built. Item 23's snapshots, health check and
-alerting are built and exercised locally, but the backup target, the heartbeat
-and the alert webhook have nothing real to point at until there is a deploy —
-and nobody is named in `ON_CALL_NAME` / `ON_CALL_PHONE`, so item 28's desk sheet
-prints a blank where the number goes.
+**It is deployed, and what is on it is the demo.** `royalty-schedule.fly.dev`
+has been live since 2026-09-09: one machine in `ord`, one volume, the image
+built from `scripts/deploy-demo.sh` with the release stamped in at build time,
+carrying `seed:demo`'s 281 people and 198 blocks on the real February weekend.
+⚠️ That is the *bid demo*, not the event's production deploy — the roster on it
+is invented, and re-running the seed on that volume would rotate every access
+code already handed out, which is why the script refuses to.
 
-**And still no real data** — which is now the only thing in the way. Item 24
-built and demonstrated the path from the workbook into the database; what is
-missing is what goes in it: the real dates (the placeholder is 2026-08-07, which
-has passed), ~80 staff against 6 example rows, ~200 dancers against 1, an email
-or phone for each of them so item 25 has somewhere to send their link, and
-Thursday, Friday and Sunday, which are almost entirely the Manual Blocks tab and
-have one example row between them.
+Three of item 23's checks are still warns on that machine, and `npm run
+preflight` names them: `BACKUP_TARGET_URL` is unset, so snapshots are verified
+every 5 minutes onto *the same volume as the database* and would not survive
+losing it; `HEARTBEAT_URL` is unset, so nothing outside the machine notices when
+it stops; and nobody is named in `ON_CALL_NAME` / `ON_CALL_PHONE`, so item 28's
+desk sheet prints a blank where the number goes. None of the three refuses a
+boot, deliberately — see `deploy-config.js`.
+
+**And still no real data** — which is now the only thing in the way of the event
+itself. Item 24 built and demonstrated the path from the workbook into the
+database; what is missing is what goes in it: ~80 staff against 6 example rows,
+~200 dancers against 1, an email or phone for each of them so item 25 has
+somewhere to send their link, and Thursday, Friday and Sunday, which are almost
+entirely the Manual Blocks tab and have one example row between them. The dates
+are now known — 5–7 February 2027, with Thursday the 4th as the arrival day —
+and `seed:demo` carries them; ⚠️ the placeholder `npm run seed` still builds
+2026-08-07, a date that has passed, which is what `npm run rehearsal` refuses by
+name.
 
 The design decisions that were blocking are settled in
 [docs/decisions.md](docs/decisions.md) — read it before changing the data model,

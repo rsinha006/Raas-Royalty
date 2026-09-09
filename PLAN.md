@@ -14,7 +14,7 @@ competition weekend. **Read this at the start of every session.**
 ## Where things stand
 
 **Done: Phase A (1–4), Phase B (5–8), Phase D (15–18), and items 9, 10, 11, 13,
-14, 19, 20, 22, 23, 27 and 28. Items 12, 21, 24, 25 and 26 are half done** — item
+14, 19, 20, 22, 23, 27, 28 and 30. Items 12, 21, 24, 25 and 26 are half done** — item
 12's name collisions are closed and its meridiem gap is the only messy-input
 item left; item 21's
 accessibility and responsive pass has landed and its hardware checks are open;
@@ -23,13 +23,14 @@ what remains of both is the roster itself; item 26's tooling and script are
 built and the rehearsal itself needs a room full of people. Item 27's gate, tag
 and drift check are built, and the freeze itself waits on a date and a machine.
 
-Item 30 (a sexual assault support contact in the viewer) landed 2026-09-09;
-the engineering is done and the assignment is a board decision.
+Item 30 (a sexual assault support contact in the viewer) landed 2026-09-09 and
+is live on the demo machine. Who holds it stays a board decision, made in the
+panel.
 
-**Item 29 (the RAS bid demo, 2026-09-10) is now the near deadline**, and it is
-narrower than the event: realistic demo data exists (`npm run seed:demo`) and
-the deploy is scripted (`scripts/deploy-demo.sh`), so what is left is a Fly
-account and a first image build. Neither is a code problem.
+**Item 29 (the RAS bid demo) is deployed** and the interview is Thursday
+2026-09-10. `royalty-schedule.fly.dev` has been up since 2026-09-09 carrying
+`seed:demo`'s roster; what is left of that item is the interview itself and
+turning the machine off afterwards.
 
 Last updated 2026-09-09.
 
@@ -124,17 +125,22 @@ Last updated 2026-09-09.
 
 The open decisions are all resolved (see below); item 12 was reshaped by them.
 
-**Not yet true of this project:** nothing is deployed *yet* — item 22 built the
-config, the guardrails and the runbook, but the `fly deploy` itself needs an
-account and has not been run, so item 23's backup target, heartbeat and alert
-webhook are configured-for rather than pointed at anything. And no real data —
-which `npm run rehearsal` now says out loud, in the form of four blockers. **And
-nothing is frozen**, because a freeze needs both of those first: item 27's gate
-refuses this tree today on the dates and the roster, and its `--url` half has no
-machine to ask.
+**Now true, as of 2026-09-09: it is deployed.** `royalty-schedule.fly.dev` — one
+machine in `ord`, one volume, the image built and the release stamped into it by
+`scripts/deploy-demo.sh`. ⚠️ What is on it is the *bid demo*: `seed:demo`'s 281
+invented people and 198 blocks on the real February weekend, not the event's
+production data. Item 23's three off-machine settings are still unset there, and
+`npm run preflight` on the machine names all three — `BACKUP_TARGET_URL` (so
+snapshots sit on the same volume as the database), `HEARTBEAT_URL` (so nothing
+outside the machine notices it stop), and `ON_CALL_NAME` / `ON_CALL_PHONE`.
 
-**Next up: the rest of items 24 and 25, which are one people problem** — the
-real dates, ~80 staff and ~200 dancers into the template with an address each,
+**Still not true:** no real data, which `npm run rehearsal` says out loud in the
+form of four blockers. **And nothing is frozen**, because a freeze needs the
+data first: item 27's gate refuses this tree today on the roster, though its
+`--url` half now has a machine to ask and it answers `demo-<commit>`.
+
+**Next up: the rest of items 24 and 25, which are one people problem** — ~80
+staff and ~200 dancers into the template with an address each,
 and Thursday/Friday/Sunday onto Manual Blocks. Both engineering halves are built
 and demonstrated; [docs/loading-data.md](docs/loading-data.md) and
 [docs/distributing-links.md](docs/distributing-links.md) are the runbooks and
@@ -1391,11 +1397,16 @@ now a checklist rather than a design problem — see "still open" below.
   the platform's current figure at deploy — it is a default, not a contract,
   and the failure looks like bad wifi rather than like config.
 
-**Still open:** no custom domain, and the deploy itself has not been run.
-Backups, monitoring and alerting landed in item 23 the same day. Docker was not available
-in this session, so the image is unbuilt and untested — expect the first
-`fly deploy` to be where a Dockerfile problem surfaces, not a working tree
-problem.
+**Run, as of 2026-09-09.** The image builds and the machine serves:
+`royalty-schedule.fly.dev`, one machine in `ord` on one volume, deployed by
+`scripts/deploy-demo.sh` (item 29) rather than by hand, which is what stamps the
+release identity in at build time. The Dockerfile was not the thing that went
+wrong; the seed step's race was, and it is fixed.
+
+**Still open:** no custom domain, and what the machine carries is demo data
+rather than the event's. Item 23's three off-machine settings — the backup
+target, the heartbeat and the on-call name — are unset on it and warn at every
+boot, by design rather than by oversight.
 
 ### 23. `[x]` Backups, monitoring, alerting
 
@@ -1891,7 +1902,7 @@ the 45 live codes.
 | Scaling to a second machine silently forks the database | Half-closed — `--ha=false`, `min_machines_running = 1`, a test, and it is the first thing `docs/deploy.md` says. But nothing can *stop* `fly scale count 2`, so it stays a live risk during event week | 22 |
 | Printed paper is acted on after it goes stale | Half closed — every page is stamped with the time it was printed and says the phone wins, and the sheets come from the same query the phones run so they never start out disagreeing. Nothing stops somebody reading Thursday's copy on Saturday; saying it out loud when the app is down is in the guide | 28 |
 | A printed sheet leaks a code | Closed — the handout pack carries no access code at all and a test asserts it; the desk index is the only page that does, and it says on it not to be handed out | 28 |
-| Total app failure during the event | Half closed — verified snapshots every 5 minutes with an off-box copy, a tested restore script, health that fails when phones are not being served, an external dead-man's switch that pages someone, and a printed pack built from the same query the phones run. The restore drill has now been *performed* end to end and timed, and is step 3.5 of the rehearsal script. The targets are unset until the deploy exists, the drill has not been run on a real machine, and nothing has actually been printed because the roster is not real | 23, 26, 28 |
+| Total app failure during the event | Half closed — verified snapshots every 5 minutes with an off-box copy, a tested restore script, health that fails when phones are not being served, an external dead-man's switch that pages someone, and a printed pack built from the same query the phones run. The restore drill has now been *performed* end to end and timed, and is step 3.5 of the rehearsal script. The deploy now exists, but the targets are still unset on it, the drill has not been run on a real machine, and nothing has actually been printed because the roster is not real | 23, 26, 28 |
 | The event dates were never checked against today by anything | Closed — `npm run rehearsal` refuses a weekend that has already happened, a date that is not the weekday it claims to be, and a non-contiguous one, measured against the venue's today. Nothing in the app asked this before, which is why the placeholder sat four days in the past unremarked | 9, 24, 26 |
 | A green CI leg that ran no tests | Half closed, and deliberately so. This happened: a quoted `tests/**/*.test.js` matched nothing on Node 20, which exited 0 and reported green until item 20 grew the suite enough to turn it red. Discovery is now that same quoted glob on a `>=22` floor, which *is* recursive — so the "test file in a subdirectory never runs" half is closed. ⚠️ The other half is open on purpose: a glob matching nothing still exits 0 on 22+, silently. Every mitigation in this table is a number of tests, so **read the count, not the tick** — if it falls toward zero rather than going red, this is the cause | 19 |
 | Unreadable on a real phone in a dark venue | Half closed — every colour is measured against AA and pinned by tests, and the screen is navigable by heading and by keyboard. The notch, the radio and the battery still need hardware | 21 |
@@ -1930,18 +1941,31 @@ A fresh Fly volume is an *empty database*, so a deploy that stops at
 link resolving to nothing. It refuses to re-seed a volume that already has a
 roster, because that would rotate every code already handed out.
 
-**Still open — and it needs the account holder, not code:**
+**Done — it is on the internet.** First deployed 2026-09-09 and redeployed the
+same day for item 30: `https://royalty-schedule.fly.dev`, one machine in `ord`,
+one 1GB volume, 281 people and 198 blocks, `/api/health` naming its own release
+(`demo-<commit>`, stamped in by the build args the script passes — a plain `fly
+deploy` would answer "unknown"). `npm run freeze -- --url` gets that answer back
+from the machine, which is the item 27 half that had nothing to ask.
 
-- **flyctl is not installed and there is no Fly account.** `fly auth login` is a
-  browser flow; nothing here can do it. That is the whole remaining blocker.
-- **The image has never been built.** Docker is not available locally either, so
-  the first `fly deploy` is where a Dockerfile problem would surface. Budget for
-  that being the thing that goes wrong, and do it before Wednesday night.
-- **The dates are a placeholder** — 2027-02-11 to 02-14, chosen only so the demo
-  is in the future. `npm run days -- --friday YYYY-MM-DD` when the real weekend
-  is known.
+**The dates are the real weekend** — 5–7 February 2027, Thursday the 4th for
+arrivals, confirmed by the event director and verified as the weekdays they
+claim to be.
+
+**Still open:**
+
+- **The interview itself**, Thursday 2026-09-10.
+- **Three preflight warns on the machine**, all of them off-machine settings and
+  none of them worth fixing for a demo: `BACKUP_TARGET_URL` (snapshots are
+  verified every 5 minutes but onto the same volume as the database),
+  `HEARTBEAT_URL`, and `ON_CALL_NAME` / `ON_CALL_PHONE`. They are the real
+  event's list, not the demo's.
 - **The board list is last year's.** `BOARD` in `server/demo-seed.js` is the one
-  place to correct it.
+  place to correct it — and the two support contacts (item 30) are placeholders
+  set from the panel, not from that list.
+- ⚠️ **The machine does not stop on its own** and the meter runs until it is
+  told to: `fly scale count 0 -a royalty-schedule` keeps the volume and stops
+  the compute, `fly apps destroy royalty-schedule` takes everything.
 
 ---
 
@@ -1984,6 +2008,12 @@ it is the board's to word, and the card's note field is where it goes.
 
 15 tests in `tests/support-contacts.test.js`; 635 in CI.
 
+**Live on the demo machine** since 2026-09-09 (`demo-5c7c340`). ⚠️ The
+designation is *data on the volume*, not something the image carries: the deploy
+brought the table and the code, and the two names had to be set separately —
+which is the same step the real event needs, in the panel, before anybody's
+phone shows the card.
+
 ---
 
 ## Timeline
@@ -1998,14 +2028,14 @@ the two that actually catch problems.
 | ~~T-5~~ | ~~Phase B (access codes).~~ Done. |
 | T-4 | Phase C (reliability core) — items 9 ✅, 10 ✅, 11 ✅, 13 ✅ and 14 ✅ done; only item 12 remains, and it waits on the template. |
 | T-3 | Phase D + E (admin tooling, tests, load test) — Phase D ✅, item 19 ✅ and item 20 ✅ done early; item 21's audit ✅. |
-| T-2 | Phase F (deploy, ops) — item 22 ✅ configured and item 23 ✅ built; both need the deploy actually run, and item 23's three secrets pointed at real services. Plus item 21's device checks on real phones. |
+| T-2 | Phase F (deploy, ops) — item 22 ✅ configured *and now run*: one machine on Fly since 2026-09-09, carrying demo data. Item 23 ✅ built; its three off-machine settings are still unset on that machine and warn at boot. Plus item 21's device checks on real phones. |
 | T-1 | Items 24–26. Items 24 ✅, 25 ✅ and 26 ✅ engineering done early; the roster and the dates are the gate for all three. Dress rehearsal — script and readiness gate ready, needs the room. |
 | Event week | Items 27–28. Both ✅ built early; what is left of 28 is naming the on-call and printing the pack, and of 27 the Wednesday itself — `npm run freeze` refuses today's tree on the dates and the roster, which is the correct answer. |
 | After | Retro. Export the edit log to see what actually changed and how often. |
 
 **Ahead of all of it: the RAS bid interview, Thursday 2026-09-10.** Item 29. It
-does not need real data — it needs the app on a hostname, which is the one thing
-never done.
+does not need real data — it needed the app on a hostname, and that is now done:
+`royalty-schedule.fly.dev`.
 
 ---
 
